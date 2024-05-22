@@ -76,71 +76,6 @@ clock_t nonlocal_block_time;
 clock_t correlator_time;
 clock_t total_time;
 
-void make_local_block(double* Blocal_re, 
-    double* Blocal_im, 
-    const double* prop_re,
-    const double* prop_im, 
-    const int* color_weights, 
-    const int* spin_weights, 
-    const double* weights, 
-    const double* psi_re, 
-    const double* psi_im,
-    const int t,
-    const int x,
-    const int Nc_f,
-    const int Ns_f,
-    const int Vsrc_f,
-    const int Vsnk_f,
-    const int Nt_f,
-    const int Nw_f,
-    const int Nq_f,
-    const int Nsrc_f) {
-   local_block_time -= clock();
-   /* loop indices */
-   int iCprime, iSprime, jCprime, jSprime, kCprime, kSprime, iC, iS, jC, jS, kC, kS, y, wnum, m;
-   /* subexpressions */
-   std::complex<double> prop_prod_02;
-   std::complex<double> prop_prod;
-   /* initialize */
-   zero_block(Blocal_re);
-   zero_block(Blocal_im);
-   /* build local (no quark exchange) block */
-   for (wnum=0; wnum<Nw_f; wnum++) {
-      iC = color_weights[index_2d(wnum,0, Nq_f)];
-      iS = spin_weights[index_2d(wnum,0, Nq_f)];
-      jC = color_weights[index_2d(wnum,1, Nq_f)];
-      jS = spin_weights[index_2d(wnum,1, Nq_f)];
-      kC = color_weights[index_2d(wnum,2, Nq_f)];
-      kS = spin_weights[index_2d(wnum,2, Nq_f)];
-      for (iCprime=0; iCprime<Nc_f; iCprime++) {
-         for (iSprime=0; iSprime<Ns_f; iSprime++) {
-            for (kCprime=0; kCprime<Nc_f; kCprime++) {
-               for (kSprime=0; kSprime<Ns_f; kSprime++) {
-                  for (y=0; y<Vsrc_f; y++) {
-                     std::complex<double> prop_0(prop_re[prop_index(0,t,iC,iS,iCprime,iSprime,y,x ,Nc_f,Ns_f,Vsrc_f,Vsnk_f,Nt_f)], prop_im[prop_index(0,t,iC,iS,iCprime,iSprime,y,x ,Nc_f,Ns_f,Vsrc_f,Vsnk_f,Nt_f)]);
-                     std::complex<double> prop_2(prop_re[prop_index(2,t,kC,kS,kCprime,kSprime,y,x ,Nc_f,Ns_f,Vsrc_f,Vsnk_f,Nt_f)], prop_im[prop_index(2,t,kC,kS,kCprime,kSprime,y,x ,Nc_f,Ns_f,Vsrc_f,Vsnk_f,Nt_f)]);
-                     prop_prod_02 = weights[wnum] * ( prop_0 * prop_2 );
-                     for (jCprime=0; jCprime<Nc_f; jCprime++) {
-                        for (jSprime=0; jSprime<Ns_f; jSprime++) {
-                           std::complex<double> prop_1(prop_re[prop_index(1,t,jC,jS,jCprime,jSprime,y,x ,Nc_f,Ns_f,Vsrc_f,Vsnk_f,Nt_f)], prop_im[prop_index(1,t,jC,jS,jCprime,jSprime,y,x ,Nc_f,Ns_f,Vsrc_f,Vsnk_f,Nt_f)]);
-                           prop_prod = prop_prod_02 * prop_1;
-                           for (m=0; m<Nsrc_f; m++) {
-                              std::complex<double> psi(psi_re[index_2d(y,m ,Nsrc_f)], psi_im[index_2d(y,m ,Nsrc_f)]);
-                              std::complex<double> block = psi * prop_prod;
-                              Blocal_re[Blocal_index(iCprime,iSprime,kCprime,kSprime,jCprime,jSprime,m ,Nc_f,Ns_f,Nsrc_f)] += real(block);
-                              Blocal_im[Blocal_index(iCprime,iSprime,kCprime,kSprime,jCprime,jSprime,m ,Nc_f,Ns_f,Nsrc_f)] += imag(block);
-                           }
-                        }
-                     }
-                  }
-               }
-            }
-         }
-      }
-   }
-   local_block_time += clock();
-}
-
 void make_local_snk_block(double* Blocal_re, 
     double* Blocal_im, 
     const double* prop_re,
@@ -301,6 +236,30 @@ void make_block(double* B_re,
       }
    }
    nonlocal_block_time += clock();
+}
+
+void make_local_block(double* B_re, 
+    double* B_im, 
+    const double* prop_re,
+    const double* prop_im, 
+    const int* color_weights, 
+    const int* spin_weights, 
+    const double* weights, 
+    const double* psi_re, 
+    const double* psi_im,
+    const int t,
+    const int x,
+    const int Nc_f,
+    const int Ns_f,
+    const int Vsrc_f,
+    const int Vsnk_f,
+    const int Nt_f,
+    const int Nw_f,
+    const int Nq_f,
+    const int Nsrc_f) {
+   make_block(B_re, B_im, prop_re, prop_im, color_weights, spin_weights,
+              weights, psi_re, psi_im, t, x, x, x,
+              Nc_f, Ns_f, Vsrc_f, Vsnk_f, Nt_f, Nw_f, Nq_f, Nsrc_f);
 }
 
 void make_first_block(double* B_re, 
