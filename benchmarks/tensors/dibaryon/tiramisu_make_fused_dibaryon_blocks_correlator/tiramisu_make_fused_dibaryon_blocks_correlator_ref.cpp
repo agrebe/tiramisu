@@ -5,6 +5,38 @@
 #include <math.h>
 #include <time.h>
 
+#define AVX2 1
+#if AVX2
+  #include <immintrin.h>
+  #define malloc(x) aligned_alloc(32, x)
+
+  #define block_ft(B_re, B_im) {\
+    __m256d prop_prod_re_vec = _mm256_set1_pd(prop_prod_re[jCprime * Ns + jSprime]); \
+    __m256d prop_prod_im_vec = _mm256_set1_pd(prop_prod_im[jCprime * Ns + jSprime]); \
+    __m256d * B_re_offset = (__m256d *) (B_re + Blocal_index(iCprime,iSprime,kCprime,kSprime,jCprime,jSprime,0,Nc,Ns,Nsrc_f)); \
+    __m256d * B_im_offset = (__m256d *) (B_im + Blocal_index(iCprime,iSprime,kCprime,kSprime,jCprime,jSprime,0,Nc,Ns,Nsrc_f)); \
+    __m256d * psi_re_offset = (__m256d *) (psi_re + index_2d(y, 0, Nsrc_f)); \
+    __m256d * psi_im_offset = (__m256d *) (psi_im + index_2d(y, 0, Nsrc_f)); \
+    for (m = 0; m < Nsrc / 4; m ++) { \
+      B_re_offset[m] += psi_re_offset[m] * prop_prod_re_vec; \
+      B_re_offset[m] -= psi_im_offset[m] * prop_prod_im_vec; \
+      B_im_offset[m] += psi_re_offset[m] * prop_prod_im_vec; \
+      B_im_offset[m] += psi_im_offset[m] * prop_prod_re_vec; \
+    } \
+  }
+#else
+  #define block_ft(B_re, B_im) { \
+    double prop_prod_re_val = prop_prod_re[jCprime * Ns + jSprime]; \
+    double prop_prod_im_val = prop_prod_im[jCprime * Ns + jSprime]; \
+    for (m=0; m<Nsrc; m++) { \
+       B_re[Blocal_index(iCprime,iSprime,kCprime,kSprime,jCprime,jSprime,m ,Nc,Ns,Nsrc_f)] \
+         += psi_re[index_2d(y,m ,Nsrc_f)] * prop_prod_re_val - psi_im[index_2d(y,m ,Nsrc_f)] * prop_prod_im_val; \
+       B_im[Blocal_index(iCprime,iSprime,kCprime,kSprime,jCprime,jSprime,m ,Nc,Ns,Nsrc_f)] \
+         += psi_im[index_2d(y,m ,Nsrc_f)] * prop_prod_re_val + psi_re[index_2d(y,m ,Nsrc_f)] * prop_prod_im_val; \
+    } \
+  }
+#endif
+
 int index_2d(int a, int b, int length2) {
    return b +length2*( a );
 }
@@ -26,6 +58,24 @@ int id_prop_index(int t, int c1, int s1, int c2, int s2, int y, int x, int Nc_f,
 int Blocal_index(int c1, int s1, int c2, int s2, int c3, int s3, int m, int Nc_f, int Ns_f, int Nsrc_f) {
    return m +Nsrc_f*( s3 +Ns_f*( c3 +Nc_f*( s2 +Ns_f*( c2 +Nc_f*( s1 +Ns_f*( c1 ))))));
 }
+
+#define zero_block(B) { \
+   for (iCprime=0; iCprime<Nc_f; iCprime++) \
+      for (iSprime=0; iSprime<Ns_f; iSprime++) \
+         for (kCprime=0; kCprime<Nc_f; kCprime++) \
+            for (kSprime=0; kSprime<Ns_f; kSprime++) \
+               for (jCprime=0; jCprime<Nc_f; jCprime++) \
+                  for (jSprime=0; jSprime<Ns_f; jSprime++) \
+                     for (m=0; m<Nsrc_f; m++) \
+                        B[Blocal_index(iCprime,iSprime,kCprime,kSprime,jCprime,jSprime,m ,Nc_f,Ns_f,Nsrc_f)] = 0.0; \
+}
+
+// timers
+clock_t first_block_time;
+clock_t second_block_time;
+clock_t third_block_time;
+clock_t correlator_time;
+clock_t total_time;
 
 void make_local_block(double* Blocal_re, 
     double* Blocal_im, 
@@ -52,22 +102,8 @@ void make_local_block(double* Blocal_re,
    std::complex<double> prop_prod_02;
    std::complex<double> prop_prod;
    /* initialize */
-   for (iCprime=0; iCprime<Nc_f; iCprime++) {
-      for (iSprime=0; iSprime<Ns_f; iSprime++) {
-         for (kCprime=0; kCprime<Nc_f; kCprime++) {
-            for (kSprime=0; kSprime<Ns_f; kSprime++) {
-               for (jCprime=0; jCprime<Nc_f; jCprime++) {
-                  for (jSprime=0; jSprime<Ns_f; jSprime++) {
-                     for (m=0; m<Nsrc_f; m++) {
-                        Blocal_re[Blocal_index(iCprime,iSprime,kCprime,kSprime,jCprime,jSprime,m ,Nc_f,Ns_f,Nsrc_f)] = 0.0;
-                        Blocal_im[Blocal_index(iCprime,iSprime,kCprime,kSprime,jCprime,jSprime,m ,Nc_f,Ns_f,Nsrc_f)] = 0.0;
-                     }
-                  }
-               }
-            }
-         }
-      }
-   }
+   zero_block(Blocal_re);
+   zero_block(Blocal_im);
    /* build local (no quark exchange) block */
    for (wnum=0; wnum<Nw_f; wnum++) {
       iC = color_weights[index_2d(wnum,0, Nq_f)];
@@ -129,22 +165,10 @@ void make_local_snk_block(double* Blocal_re,
    std::complex<double> prop_prod_02;
    std::complex<double> prop_prod;
    /* initialize */
-   for (iCprime=0; iCprime<Nc_f; iCprime++) {
-      for (iSprime=0; iSprime<Ns_f; iSprime++) {
-         for (kCprime=0; kCprime<Nc_f; kCprime++) {
-            for (kSprime=0; kSprime<Ns_f; kSprime++) {
-               for (jCprime=0; jCprime<Nc_f; jCprime++) {
-                  for (jSprime=0; jSprime<Ns_f; jSprime++) {
-                     for (n=0; n<Nsnk_f; n++) {
-                        Blocal_re[Blocal_index(iCprime,iSprime,kCprime,kSprime,jCprime,jSprime,n ,Nc_f,Ns_f,Nsnk_f)] = 0.0;
-                        Blocal_im[Blocal_index(iCprime,iSprime,kCprime,kSprime,jCprime,jSprime,n ,Nc_f,Ns_f,Nsnk_f)] = 0.0;
-                     }
-                  }
-               }
-            }
-         }
-      }
-   }
+   int Nsrc_f = Nsnk_f;
+   int m;
+   zero_block(Blocal_re);
+   zero_block(Blocal_im);
    /* build local (no quark exchange) block */
    for (wnum=0; wnum<Nw_f; wnum++) {
       iC = color_weights[index_2d(wnum,0, Nq_f)];
@@ -203,73 +227,88 @@ void make_second_block(double* Bsecond_re,
     const int Nw_f,
     const int Nq_f,
     const int Nsrc_f) {
+   second_block_time -= clock();
+   assert(Nc == Nc_f);
+   assert(Ns == Ns_f);
    /* loop indices */
    int iCprime, iSprime, jCprime, jSprime, kCprime, kSprime, iC, iS, jC, jS, kC, kS, y, wnum, m;
    /* subexpressions */
    std::complex <double> prop_prod_02;
-   std::complex <double> prop_prod;
+   double prop_prod_1_re [Ns * Nc], prop_prod_1_im [Ns * Nc], 
+          prop_prod_2_re [Ns * Nc], prop_prod_2_im [Ns * Nc];
    /* initialize */
-   for (iCprime=0; iCprime<Nc_f; iCprime++) {
-      for (iSprime=0; iSprime<Ns_f; iSprime++) {
-         for (kCprime=0; kCprime<Nc_f; kCprime++) {
-            for (kSprime=0; kSprime<Ns_f; kSprime++) {
-               for (jCprime=0; jCprime<Nc_f; jCprime++) {
-                  for (jSprime=0; jSprime<Ns_f; jSprime++) {
-                     for (m=0; m<Nsrc_f; m++) {
-                        Blocal_re[Blocal_index(iCprime,iSprime,kCprime,kSprime,jCprime,jSprime,m ,Nc_f,Ns_f,Nsrc_f)] = 0.0;
-                        Blocal_im[Blocal_index(iCprime,iSprime,kCprime,kSprime,jCprime,jSprime,m ,Nc_f,Ns_f,Nsrc_f)] = 0.0;
-                        Bsecond_re[Blocal_index(iCprime,iSprime,kCprime,kSprime,jCprime,jSprime,m ,Nc_f,Ns_f,Nsrc_f)] = 0.0;
-                        Bsecond_im[Blocal_index(iCprime,iSprime,kCprime,kSprime,jCprime,jSprime,m ,Nc_f,Ns_f,Nsrc_f)] = 0.0;
-                     }
-                  }
+   zero_block(Blocal_re);
+   zero_block(Blocal_im);
+   zero_block(Bsecond_re);
+   zero_block(Bsecond_im);
+   double packed_prop_1_re [Vsrc_f * Nc * Ns * Nc * Ns], packed_prop_1_im [Vsrc_f * Nc * Ns * Nc * Ns];
+   double packed_second_prop_1_re [Vsrc_f * Nc * Ns * Nc * Ns], packed_second_prop_1_im [Vsrc_f * Nc * Ns * Nc * Ns];
+   for (y = 0; y < Vsrc_f; y ++)
+      for (jC = 0; jC < Nc; jC ++)
+         for (jS = 0; jS < Ns; jS ++)
+            for (jCprime = 0; jCprime < Nc; jCprime ++)
+               for (jSprime = 0; jSprime < Ns; jSprime ++) {
+                  int new_index = (((y * Nc + jC) * Ns + jS) * Nc + jCprime) * Ns + jSprime;
+                  int old_index = prop_index(1,t,jC,jS,jCprime,jSprime,y,x1 ,Nc,Ns,Vsrc_f,Vsnk_f,Nt_f);
+                  packed_prop_1_re[new_index] = prop_re[old_index];
+                  packed_prop_1_im[new_index] = prop_im[old_index];
+                  old_index = prop_index(1,t,jC,jS,jCprime,jSprime,y,x2 ,Nc,Ns,Vsrc_f,Vsnk_f,Nt_f);
+                  packed_second_prop_1_re[new_index] = prop_re[old_index];
+                  packed_second_prop_1_im[new_index] = prop_im[old_index];
                }
-            }
-         }
-      }
-   }
    /* build local (no quark exchange) block */
-   for (wnum=0; wnum<Nw_f; wnum++) {
-      iC = color_weights[index_2d(wnum,0, Nq_f)];
-      iS = spin_weights[index_2d(wnum,0, Nq_f)];
-      jC = color_weights[index_2d(wnum,1, Nq_f)];
-      jS = spin_weights[index_2d(wnum,1, Nq_f)];
-      kC = color_weights[index_2d(wnum,2, Nq_f)];
-      kS = spin_weights[index_2d(wnum,2, Nq_f)];
-      for (iCprime=0; iCprime<Nc_f; iCprime++) {
-         for (iSprime=0; iSprime<Ns_f; iSprime++) {
-            for (kCprime=0; kCprime<Nc_f; kCprime++) {
-               for (kSprime=0; kSprime<Ns_f; kSprime++) {
-                  for (y=0; y<Vsrc_f; y++) {
-                     std::complex<double> prop_0(prop_re[prop_index(0,t,iC,iS,iCprime,iSprime,y,x1 ,Nc_f,Ns_f,Vsrc_f,Vsnk_f,Nt_f)], prop_im[prop_index(0,t,iC,iS,iCprime,iSprime,y,x1 ,Nc_f,Ns_f,Vsrc_f,Vsnk_f,Nt_f)]);
-                     std::complex<double> prop_2(prop_re[prop_index(2,t,kC,kS,kCprime,kSprime,y,x1 ,Nc_f,Ns_f,Vsrc_f,Vsnk_f,Nt_f)], prop_im[prop_index(2,t,kC,kS,kCprime,kSprime,y,x1 ,Nc_f,Ns_f,Vsrc_f,Vsnk_f,Nt_f)]);
+   for (iCprime=0; iCprime<Nc; iCprime++) {
+      for (iSprime=0; iSprime<Ns; iSprime++) {
+         for (kCprime=0; kCprime<Nc; kCprime++) {
+            for (kSprime=0; kSprime<Ns; kSprime++) {
+               for (y=0; y<Vsrc_f; y++) {
+                  for (int index = 0; index < Nc * Ns; index ++) {
+                     prop_prod_1_re[index] = prop_prod_1_im[index] = 0;
+                     prop_prod_2_re[index] = prop_prod_2_im[index] = 0;
+                  }
+                  for (wnum=0; wnum<Nw_f; wnum++) {
+                     iC = color_weights[index_2d(wnum,0, Nq_f)];
+                     iS = spin_weights[index_2d(wnum,0, Nq_f)];
+                     jC = color_weights[index_2d(wnum,1, Nq_f)];
+                     jS = spin_weights[index_2d(wnum,1, Nq_f)];
+                     kC = color_weights[index_2d(wnum,2, Nq_f)];
+                     kS = spin_weights[index_2d(wnum,2, Nq_f)];
+                     std::complex<double> prop_0(prop_re[prop_index(0,t,iC,iS,iCprime,iSprime,y,x1 ,Nc,Ns,Vsrc_f,Vsnk_f,Nt_f)], prop_im[prop_index(0,t,iC,iS,iCprime,iSprime,y,x1 ,Nc,Ns,Vsrc_f,Vsnk_f,Nt_f)]);
+                     std::complex<double> prop_2(prop_re[prop_index(2,t,kC,kS,kCprime,kSprime,y,x1 ,Nc,Ns,Vsrc_f,Vsnk_f,Nt_f)], prop_im[prop_index(2,t,kC,kS,kCprime,kSprime,y,x1 ,Nc,Ns,Vsrc_f,Vsnk_f,Nt_f)]);
                      prop_prod_02 = weights[wnum] * ( prop_0 * prop_2 );
-                     for (jCprime=0; jCprime<Nc_f; jCprime++) {
-                        for (jSprime=0; jSprime<Ns_f; jSprime++) {
-                           std::complex<double> prop_1(prop_re[prop_index(1,t,jC,jS,jCprime,jSprime,y,x1 ,Nc_f,Ns_f,Vsrc_f,Vsnk_f,Nt_f)], prop_im[prop_index(1,t,jC,jS,jCprime,jSprime,y,x1 ,Nc_f,Ns_f,Vsrc_f,Vsnk_f,Nt_f)]);
-                           prop_prod = prop_prod_02 * prop_1;
-                           for (m=0; m<Nsrc_f; m++) {
-                              std::complex<double> psi(psi_re[index_2d(y,m ,Nsrc_f)], psi_im[index_2d(y,m ,Nsrc_f)]);
-                              std::complex<double> block = psi * prop_prod;
-                              Blocal_re[Blocal_index(iCprime,iSprime,kCprime,kSprime,jCprime,jSprime,m ,Nc_f,Ns_f,Nsrc_f)] += real(block);
-                              Blocal_im[Blocal_index(iCprime,iSprime,kCprime,kSprime,jCprime,jSprime,m ,Nc_f,Ns_f,Nsrc_f)] += imag(block);
-                           }
-                           std::complex<double> second_prop_1(prop_re[prop_index(1,t,jC,jS,jCprime,jSprime,y,x2 ,Nc_f,Ns_f,Vsrc_f,Vsnk_f,Nt_f)], prop_im[prop_index(1,t,jC,jS,jCprime,jSprime,y,x2 ,Nc_f,Ns_f,Vsrc_f,Vsnk_f,Nt_f)]);
-                           prop_prod = prop_prod_02 * second_prop_1;
-                           for (m=0; m<Nsrc_f; m++) {
-                              std::complex<double> psi(psi_re[index_2d(y,m ,Nsrc_f)], psi_im[index_2d(y,m ,Nsrc_f)]);
-                              std::complex<double> block = psi * prop_prod;
-                              Bsecond_re[Blocal_index(iCprime,iSprime,kCprime,kSprime,jCprime,jSprime,m ,Nc_f,Ns_f,Nsrc_f)] += real(block);
-                              Bsecond_im[Blocal_index(iCprime,iSprime,kCprime,kSprime,jCprime,jSprime,m ,Nc_f,Ns_f,Nsrc_f)] += imag(block);
-                           }
+                     double prop_prod_02_re = real(prop_prod_02);
+                     double prop_prod_02_im = imag(prop_prod_02);
+                     for (jCprime=0; jCprime<Nc; jCprime++) {
+                        for (jSprime=0; jSprime<Ns; jSprime++) {
+                           int packed_index = (((y * Nc + jC) * Ns + jS) * Nc + jCprime) * Ns + jSprime;
+                           double prop_1_re = packed_prop_1_re[packed_index];
+                           double prop_1_im = packed_prop_1_im[packed_index];
+                           prop_prod_1_re[jCprime * Ns + jSprime] += prop_1_re * prop_prod_02_re - prop_1_im * prop_prod_02_im;
+                           prop_prod_1_im[jCprime * Ns + jSprime] += prop_1_im * prop_prod_02_re + prop_1_re * prop_prod_02_im;
+                           double second_prop_1_re = packed_second_prop_1_re[packed_index];
+                           double second_prop_1_im = packed_second_prop_1_im[packed_index];
+                           prop_prod_2_re[jCprime * Ns + jSprime] += second_prop_1_re * prop_prod_02_re - second_prop_1_im * prop_prod_02_im;
+                           prop_prod_2_im[jCprime * Ns + jSprime] += second_prop_1_im * prop_prod_02_re + second_prop_1_re * prop_prod_02_im;
                         }
                      }
                   }
+                  for (jCprime=0; jCprime<Nc; jCprime++) {
+                     for (jSprime=0; jSprime<Ns; jSprime++) {
+                        double * prop_prod_re, * prop_prod_im;
+                        prop_prod_re = prop_prod_1_re; prop_prod_im = prop_prod_1_im;
+                        block_ft(Blocal_re, Blocal_im);
+                        prop_prod_re = prop_prod_2_re; prop_prod_im = prop_prod_2_im;
+                        block_ft(Bsecond_re, Bsecond_im);
+                     }
+                  }
                }
             }
          }
       }
    }
+   second_block_time += clock();
 }
+
 
 void make_first_block(double* Bfirst_re, 
     double* Bfirst_im, 
@@ -291,62 +330,81 @@ void make_first_block(double* Bfirst_re,
     const int Nw_f,
     const int Nq_f,
     const int Nsrc_f) {
+   first_block_time -= clock();
+   assert(Nc == Nc_f);
+   assert(Ns == Ns_f);
+   assert(Nsrc == Nsrc_f);
    /* loop indices */
    int iCprime, iSprime, jCprime, jSprime, kCprime, kSprime, iC, iS, jC, jS, kC, kS, y, wnum, m;
    /* subexpressions */
    std::complex <double> prop_prod_02;
-   std::complex <double> prop_prod;
+   double prop_prod_re[Ns * Nc], prop_prod_im[Ns * Nc];
    /* initialize */
-   for (iCprime=0; iCprime<Nc_f; iCprime++) {
-      for (iSprime=0; iSprime<Ns_f; iSprime++) {
-         for (kCprime=0; kCprime<Nc_f; kCprime++) {
-            for (kSprime=0; kSprime<Ns_f; kSprime++) {
-               for (jCprime=0; jCprime<Nc_f; jCprime++) {
-                  for (jSprime=0; jSprime<Ns_f; jSprime++) {
-                     for (m=0; m<Nsrc_f; m++) {
-                        Bfirst_re[Blocal_index(iCprime,iSprime,kCprime,kSprime,jCprime,jSprime,m ,Nc_f,Ns_f,Nsrc_f)] = 0.0;
-                        Bfirst_im[Blocal_index(iCprime,iSprime,kCprime,kSprime,jCprime,jSprime,m ,Nc_f,Ns_f,Nsrc_f)] = 0.0;
-                     }
-                  }
+   zero_block(Bfirst_re);
+   zero_block(Bfirst_im);
+   double packed_prop_0_re [Vsrc_f * Nc * Ns * Nc * Ns], packed_prop_0_im [Vsrc_f * Nc * Ns * Nc * Ns];
+   double packed_prop_1_re [Vsrc_f * Nc * Ns * Nc * Ns], packed_prop_1_im [Vsrc_f * Nc * Ns * Nc * Ns];
+   double packed_prop_2_re [Vsrc_f * Nc * Ns * Nc * Ns], packed_prop_2_im [Vsrc_f * Nc * Ns * Nc * Ns];
+   for (y = 0; y < Vsrc_f; y ++)
+      for (iC = 0; iC < Nc; iC ++)
+         for (iS = 0; iS < Ns; iS ++)
+            for (iCprime = 0; iCprime < Nc; iCprime ++)
+               for (iSprime = 0; iSprime < Ns; iSprime ++) {
+                  int new_index = (((y * Nc + iC) * Ns + iS) * Nc + iCprime) * Ns + iSprime;
+                  int old_index = prop_index(0,t,iC,iS,iCprime,iSprime,y,x2 ,Nc,Ns,Vsrc_f,Vsnk_f,Nt_f);
+                  packed_prop_0_re[new_index] = prop_re[old_index];
+                  packed_prop_0_im[new_index] = prop_im[old_index];
+                  old_index = prop_index(1,t,iC,iS,iCprime,iSprime,y,x1 ,Nc,Ns,Vsrc_f,Vsnk_f,Nt_f);
+                  packed_prop_1_re[new_index] = prop_re[old_index];
+                  packed_prop_1_im[new_index] = prop_im[old_index];
+                  old_index = prop_index(2,t,iC,iS,iCprime,iSprime,y,x1 ,Nc,Ns,Vsrc_f,Vsnk_f,Nt_f);
+                  packed_prop_2_re[new_index] = prop_re[old_index];
+                  packed_prop_2_im[new_index] = prop_im[old_index];
                }
-            }
-         }
-      }
-   }
    /* build local (no quark exchange) block */
-   for (wnum=0; wnum<Nw_f; wnum++) {
-      iC = color_weights[index_2d(wnum,0, Nq_f)];
-      iS = spin_weights[index_2d(wnum,0, Nq_f)];
-      jC = color_weights[index_2d(wnum,1, Nq_f)];
-      jS = spin_weights[index_2d(wnum,1, Nq_f)];
-      kC = color_weights[index_2d(wnum,2, Nq_f)];
-      kS = spin_weights[index_2d(wnum,2, Nq_f)];
-      for (iCprime=0; iCprime<Nc_f; iCprime++) {
-         for (iSprime=0; iSprime<Ns_f; iSprime++) {
-            for (kCprime=0; kCprime<Nc_f; kCprime++) {
-               for (kSprime=0; kSprime<Ns_f; kSprime++) {
-                  for (y=0; y<Vsrc_f; y++) {
-                     std::complex<double> prop_0(prop_re[prop_index(0,t,iC,iS,iCprime,iSprime,y,x2 ,Nc_f,Ns_f,Vsrc_f,Vsnk_f,Nt_f)], prop_im[prop_index(0,t,iC,iS,iCprime,iSprime,y,x2 ,Nc_f,Ns_f,Vsrc_f,Vsnk_f,Nt_f)]);
-                     std::complex<double> prop_2(prop_re[prop_index(2,t,kC,kS,kCprime,kSprime,y,x1 ,Nc_f,Ns_f,Vsrc_f,Vsnk_f,Nt_f)], prop_im[prop_index(2,t,kC,kS,kCprime,kSprime,y,x1 ,Nc_f,Ns_f,Vsrc_f,Vsnk_f,Nt_f)]);
-                     prop_prod_02 = weights[wnum] * ( prop_0 * prop_2 );
-                     for (jCprime=0; jCprime<Nc_f; jCprime++) {
-                        for (jSprime=0; jSprime<Ns_f; jSprime++) {
-                           std::complex<double> prop_1(prop_re[prop_index(1,t,jC,jS,jCprime,jSprime,y,x1 ,Nc_f,Ns_f,Vsrc_f,Vsnk_f,Nt_f)], prop_im[prop_index(1,t,jC,jS,jCprime,jSprime,y,x1 ,Nc_f,Ns_f,Vsrc_f,Vsnk_f,Nt_f)]);
-                           prop_prod = prop_prod_02 * prop_1;
-                           for (m=0; m<Nsrc_f; m++) {
-                              std::complex<double> psi(psi_re[index_2d(y,m ,Nsrc_f)], psi_im[index_2d(y,m ,Nsrc_f)]);
-                              std::complex<double> block = psi * prop_prod;
-                              Bfirst_re[Blocal_index(iCprime,iSprime,kCprime,kSprime,jCprime,jSprime,m ,Nc_f,Ns_f,Nsrc_f)] += real(block);
-                              Bfirst_im[Blocal_index(iCprime,iSprime,kCprime,kSprime,jCprime,jSprime,m ,Nc_f,Ns_f,Nsrc_f)] += imag(block);
-                           }
+   for (iCprime=0; iCprime<Nc; iCprime++) {
+      for (iSprime=0; iSprime<Ns; iSprime++) {
+         for (kCprime=0; kCprime<Nc; kCprime++) {
+            for (kSprime=0; kSprime<Ns; kSprime++) {
+               for (y=0; y<Vsrc_f; y++) {
+                  for (int index = 0; index < Nc * Ns; index ++)
+                     prop_prod_re[index] = prop_prod_im[index] = 0;
+                  for (wnum=0; wnum<Nw_f; wnum++) {
+                     iC = color_weights[index_2d(wnum,0, Nq_f)];
+                     iS = spin_weights[index_2d(wnum,0, Nq_f)];
+                     jC = color_weights[index_2d(wnum,1, Nq_f)];
+                     jS = spin_weights[index_2d(wnum,1, Nq_f)];
+                     kC = color_weights[index_2d(wnum,2, Nq_f)];
+                     kS = spin_weights[index_2d(wnum,2, Nq_f)];
+                     int prop_0_index = (((y * Nc + iC) * Ns + iS) * Nc + iCprime) * Ns + iSprime;
+                     int prop_2_index = (((y * Nc + kC) * Ns + kS) * Nc + kCprime) * Ns + kSprime;
+                     double prop_0_re = packed_prop_0_re[prop_0_index];
+                     double prop_0_im = packed_prop_0_im[prop_0_index];
+                     double prop_2_re = packed_prop_2_re[prop_2_index];
+                     double prop_2_im = packed_prop_2_im[prop_2_index];
+                     double prop_prod_02_re = weights[wnum] * (prop_0_re * prop_2_re - prop_0_im * prop_2_im);
+                     double prop_prod_02_im = weights[wnum] * (prop_0_im * prop_2_re + prop_0_re * prop_2_im);
+                     for (jCprime=0; jCprime<Nc; jCprime++) {
+                        for (jSprime=0; jSprime<Ns; jSprime++) {
+                           int packed_index = (((y * Nc + jC) * Ns + jS) * Nc + jCprime) * Ns + jSprime;
+                           double prop_1_re = packed_prop_1_re[packed_index];
+                           double prop_1_im = packed_prop_1_im[packed_index];
+                           prop_prod_re[jCprime * Ns + jSprime] += prop_1_re * prop_prod_02_re - prop_1_im * prop_prod_02_im;
+                           prop_prod_im[jCprime * Ns + jSprime] += prop_1_im * prop_prod_02_re + prop_1_re * prop_prod_02_im;
                         }
                      }
                   }
+                  for (jCprime=0; jCprime<Nc; jCprime++) {
+                     for (jSprime=0; jSprime<Ns; jSprime++) {
+                        block_ft(Bfirst_re, Bfirst_im);
+                     }
+                  }
                }
             }
          }
       }
    }
+   first_block_time += clock();
 }
 
 void make_third_block(double* Bthird_re, 
@@ -369,62 +427,71 @@ void make_third_block(double* Bthird_re,
     const int Nw_f,
     const int Nq_f,
     const int Nsrc_f) {
+   third_block_time -= clock();
+   assert(Nc == Nc_f);
+   assert(Ns == Ns_f);
    /* loop indices */
    int iCprime, iSprime, jCprime, jSprime, kCprime, kSprime, iC, iS, jC, jS, kC, kS, y, wnum, m;
    /* subexpressions */
    std::complex <double> prop_prod_02;
-   std::complex <double> prop_prod;
+   double prop_prod_re[Ns * Nc], prop_prod_im[Ns * Nc];
    /* initialize */
-   for (iCprime=0; iCprime<Nc_f; iCprime++) {
-      for (iSprime=0; iSprime<Ns_f; iSprime++) {
-         for (kCprime=0; kCprime<Nc_f; kCprime++) {
-            for (kSprime=0; kSprime<Ns_f; kSprime++) {
-               for (jCprime=0; jCprime<Nc_f; jCprime++) {
-                  for (jSprime=0; jSprime<Ns_f; jSprime++) {
-                     for (m=0; m<Nsrc_f; m++) {
-                        Bthird_re[Blocal_index(iCprime,iSprime,kCprime,kSprime,jCprime,jSprime,m ,Nc_f,Ns_f,Nsrc_f)] = 0.0;
-                        Bthird_im[Blocal_index(iCprime,iSprime,kCprime,kSprime,jCprime,jSprime,m ,Nc_f,Ns_f,Nsrc_f)] = 0.0;
-                     }
-                  }
+   zero_block(Bthird_re);
+   zero_block(Bthird_im);
+   double packed_prop_1_re [Vsrc_f * Nc * Ns * Nc * Ns], packed_prop_1_im [Vsrc_f * Nc * Ns * Nc * Ns];
+   for (y = 0; y < Vsrc_f; y ++)
+      for (jC = 0; jC < Nc; jC ++)
+         for (jS = 0; jS < Ns; jS ++)
+            for (jCprime = 0; jCprime < Nc; jCprime ++)
+               for (jSprime = 0; jSprime < Ns; jSprime ++) {
+                  int new_index = (((y * Nc + jC) * Ns + jS) * Nc + jCprime) * Ns + jSprime;
+                  int old_index = prop_index(1,t,jC,jS,jCprime,jSprime,y,x1 ,Nc,Ns,Vsrc_f,Vsnk_f,Nt_f);
+                  packed_prop_1_re[new_index] = prop_re[old_index];
+                  packed_prop_1_im[new_index] = prop_im[old_index];
                }
-            }
-         }
-      }
-   }
    /* build local (no quark exchange) block */
-   for (wnum=0; wnum<Nw_f; wnum++) {
-      iC = color_weights[index_2d(wnum,0, Nq_f)];
-      iS = spin_weights[index_2d(wnum,0, Nq_f)];
-      jC = color_weights[index_2d(wnum,1, Nq_f)];
-      jS = spin_weights[index_2d(wnum,1, Nq_f)];
-      kC = color_weights[index_2d(wnum,2, Nq_f)];
-      kS = spin_weights[index_2d(wnum,2, Nq_f)];
-      for (iCprime=0; iCprime<Nc_f; iCprime++) {
-         for (iSprime=0; iSprime<Ns_f; iSprime++) {
-            for (kCprime=0; kCprime<Nc_f; kCprime++) {
-               for (kSprime=0; kSprime<Ns_f; kSprime++) {
-                  for (y=0; y<Vsrc_f; y++) {
-                     std::complex<double> prop_0(prop_re[prop_index(0,t,iC,iS,iCprime,iSprime,y,x1 ,Nc_f,Ns_f,Vsrc_f,Vsnk_f,Nt_f)], prop_im[prop_index(0,t,iC,iS,iCprime,iSprime,y,x1 ,Nc_f,Ns_f,Vsrc_f,Vsnk_f,Nt_f)]);
-                     std::complex<double> prop_2(prop_re[prop_index(2,t,kC,kS,kCprime,kSprime,y,x2 ,Nc_f,Ns_f,Vsrc_f,Vsnk_f,Nt_f)], prop_im[prop_index(2,t,kC,kS,kCprime,kSprime,y,x2 ,Nc_f,Ns_f,Vsrc_f,Vsnk_f,Nt_f)]);
+   for (iCprime=0; iCprime<Nc; iCprime++) {
+      for (iSprime=0; iSprime<Ns; iSprime++) {
+         for (kCprime=0; kCprime<Nc; kCprime++) {
+            for (kSprime=0; kSprime<Ns; kSprime++) {
+               for (y=0; y<Vsrc_f; y++) {
+                  for (int index = 0; index < Nc * Ns; index ++)
+                     prop_prod_re[index] = prop_prod_im[index] = 0;
+                  for (wnum=0; wnum<Nw_f; wnum++) {
+                     iC = color_weights[index_2d(wnum,0, Nq_f)];
+                     iS = spin_weights[index_2d(wnum,0, Nq_f)];
+                     jC = color_weights[index_2d(wnum,1, Nq_f)];
+                     jS = spin_weights[index_2d(wnum,1, Nq_f)];
+                     kC = color_weights[index_2d(wnum,2, Nq_f)];
+                     kS = spin_weights[index_2d(wnum,2, Nq_f)];
+                     std::complex<double> prop_0(prop_re[prop_index(0,t,iC,iS,iCprime,iSprime,y,x1 ,Nc,Ns,Vsrc_f,Vsnk_f,Nt_f)], prop_im[prop_index(0,t,iC,iS,iCprime,iSprime,y,x1 ,Nc,Ns,Vsrc_f,Vsnk_f,Nt_f)]);
+                     std::complex<double> prop_2(prop_re[prop_index(2,t,kC,kS,kCprime,kSprime,y,x2 ,Nc,Ns,Vsrc_f,Vsnk_f,Nt_f)], prop_im[prop_index(2,t,kC,kS,kCprime,kSprime,y,x2 ,Nc,Ns,Vsrc_f,Vsnk_f,Nt_f)]);
                      prop_prod_02 = weights[wnum] * ( prop_0 * prop_2 );
-                     for (jCprime=0; jCprime<Nc_f; jCprime++) {
-                        for (jSprime=0; jSprime<Ns_f; jSprime++) {
-                           std::complex<double> prop_1(prop_re[prop_index(1,t,jC,jS,jCprime,jSprime,y,x1 ,Nc_f,Ns_f,Vsrc_f,Vsnk_f,Nt_f)], prop_im[prop_index(1,t,jC,jS,jCprime,jSprime,y,x1 ,Nc_f,Ns_f,Vsrc_f,Vsnk_f,Nt_f)]);
-                           prop_prod = prop_prod_02 * prop_1;
-                           for (m=0; m<Nsrc_f; m++) {
-                              std::complex<double> psi(psi_re[index_2d(y,m ,Nsrc_f)], psi_im[index_2d(y,m ,Nsrc_f)]);
-                              std::complex<double> block = psi * prop_prod;
-                              Bthird_re[Blocal_index(iCprime,iSprime,kCprime,kSprime,jCprime,jSprime,m ,Nc_f,Ns_f,Nsrc_f)] += real(block);
-                              Bthird_im[Blocal_index(iCprime,iSprime,kCprime,kSprime,jCprime,jSprime,m ,Nc_f,Ns_f,Nsrc_f)] += imag(block);
-                           }
+                     double prop_prod_02_re = real(prop_prod_02);
+                     double prop_prod_02_im = imag(prop_prod_02);
+                     for (jCprime=0; jCprime<Nc; jCprime++) {
+                        for (jSprime=0; jSprime<Ns; jSprime++) {
+                           int packed_index = (((y * Nc + jC) * Ns + jS) * Nc + jCprime) * Ns + jSprime;
+                           double prop_1_re = packed_prop_1_re[packed_index];
+                           double prop_1_im = packed_prop_1_im[packed_index];
+                           prop_prod_re[jCprime * Ns + jSprime] += prop_1_re * prop_prod_02_re - prop_1_im * prop_prod_02_im;
+                           prop_prod_im[jCprime * Ns + jSprime] += prop_1_im * prop_prod_02_re + prop_1_re * prop_prod_02_im;
                         }
                      }
                   }
+                  for (jCprime=0; jCprime<Nc; jCprime++) {
+                     for (jSprime=0; jSprime<Ns; jSprime++) {
+                        double prop_prod_re_val = prop_prod_re[jCprime * Ns + jSprime];
+                        double prop_prod_im_val = prop_prod_im[jCprime * Ns + jSprime];
+                        block_ft(Bthird_re, Bthird_im);
+                     }
+                  }
                }
             }
          }
       }
    }
+   third_block_time += clock();
 }
 
 void make_dibaryon_correlator(double* C_re,
@@ -483,6 +550,7 @@ void make_dibaryon_correlator(double* C_re,
     const int Nsrc_f,
     const int Nsnk_f,
     const int Nperms_f) {
+   correlator_time -= clock();
    /* indices */
    int iC1,iS1,jC1,jS1,kC1,kS1,iC2,iS2,jC2,jS2,kC2,kS2,wnum,nperm,b,n,m;
    int Nb_f = 2;
@@ -498,6 +566,11 @@ void make_dibaryon_correlator(double* C_re,
    int snk_1[Nb_f];
    int snk_2[Nb_f];
    int snk_3[Nb_f];
+   const double * B_re [Nb_f];
+   const double * B_im [Nb_f];
+   double sum_re[Nsrc_f], sum_im[Nsrc_f];
+   for (n = 0; n < Nsrc_f; n ++)
+      sum_re[n] = sum_im[n] = 0;
    for (nperm=0; nperm<Nperms_f; nperm++) {
       for (b=0; b<Nb_f; b++) {
          snk_1[b] = perms[index_2d(nperm,Nq_f*b+0 ,2*Nq_f)] - 1;
@@ -509,6 +582,40 @@ void make_dibaryon_correlator(double* C_re,
          snk_1_nq[b] = snk_1[b] % Nq_f;
          snk_2_nq[b] = snk_2[b] % Nq_f;
          snk_3_nq[b] = snk_3[b] % Nq_f;
+         if ((src_spins[b] == 1) && (snk_1_b[b] == 0) && (snk_2_b[b] == 0) && (snk_3_b[b] == 0)) {
+           B_re[b] = B1_r1_Blocal_re;  B_im[b] = B1_r1_Blocal_im;
+         } else if ((src_spins[b] == 1) && (snk_1_b[b] == 1) && (snk_2_b[b] == 1) && (snk_3_b[b] == 1)) {
+           B_re[b] = B2_r1_Blocal_re;  B_im[b] = B2_r1_Blocal_im;
+         } else if ((src_spins[b] == 1) && (snk_1_b[b] == 0) && (snk_2_b[b] == 1) && (snk_3_b[b] == 0)) {
+           B_re[b] = B1_r1_Bsecond_re; B_im[b] = B1_r1_Bsecond_im;
+         } else if ((src_spins[b] == 1) && (snk_1_b[b] == 1) && (snk_2_b[b] == 0) && (snk_3_b[b] == 1)) {
+           B_re[b] = B2_r1_Bsecond_re; B_im[b] = B2_r1_Bsecond_im;
+         } else if ((src_spins[b] == 1) && (snk_1_b[b] == 1) && (snk_2_b[b] == 0) && (snk_3_b[b] == 0)) {
+           B_re[b] = B1_r1_Bfirst_re;  B_im[b] = B1_r1_Bfirst_im;
+         } else if ((src_spins[b] == 1) && (snk_1_b[b] == 0) && (snk_2_b[b] == 1) && (snk_3_b[b] == 1)) {
+           B_re[b] = B2_r1_Bfirst_re;  B_im[b] = B2_r1_Bfirst_im;
+         } else if ((src_spins[b] == 1) && (snk_1_b[b] == 0) && (snk_2_b[b] == 0) && (snk_3_b[b] == 1)) {
+           B_re[b] = B1_r1_Bthird_re;  B_im[b] = B1_r1_Bthird_im;
+         } else if ((src_spins[b] == 1) && (snk_1_b[b] == 1) && (snk_2_b[b] == 1) && (snk_3_b[b] == 0)) {
+           B_re[b] = B2_r1_Bthird_re;  B_im[b] = B2_r1_Bthird_im;
+         } else if ((src_spins[b] == 2) && (snk_1_b[b] == 0) && (snk_2_b[b] == 0) && (snk_3_b[b] == 0)) {
+           B_re[b] = B1_r2_Blocal_re;  B_im[b] = B1_r2_Blocal_im;
+         } else if ((src_spins[b] == 2) && (snk_1_b[b] == 1) && (snk_2_b[b] == 1) && (snk_3_b[b] == 1)) {
+           B_re[b] = B2_r2_Blocal_re;  B_im[b] = B2_r2_Blocal_im;
+         } else if ((src_spins[b] == 2) && (snk_1_b[b] == 0) && (snk_2_b[b] == 1) && (snk_3_b[b] == 0)) {
+           B_re[b] = B1_r2_Bsecond_re; B_im[b] = B1_r2_Bsecond_im;
+         } else if ((src_spins[b] == 2) && (snk_1_b[b] == 1) && (snk_2_b[b] == 0) && (snk_3_b[b] == 1)) {
+           B_re[b] = B2_r2_Bsecond_re; B_im[b] = B2_r2_Bsecond_im;
+         } else if ((src_spins[b] == 2) && (snk_1_b[b] == 1) && (snk_2_b[b] == 0) && (snk_3_b[b] == 0)) {
+           B_re[b] = B1_r2_Bfirst_re;  B_im[b] = B1_r2_Bfirst_im;
+         } else if ((src_spins[b] == 2) && (snk_1_b[b] == 0) && (snk_2_b[b] == 1) && (snk_3_b[b] == 1)) {
+           B_re[b] = B2_r2_Bfirst_re;  B_im[b] = B2_r2_Bfirst_im;
+         } else if ((src_spins[b] == 2) && (snk_1_b[b] == 0) && (snk_2_b[b] == 0) && (snk_3_b[b] == 1)) {
+           B_re[b] = B1_r2_Bthird_re;  B_im[b] = B1_r2_Bthird_im;
+         } else if ((src_spins[b] == 2) && (snk_1_b[b] == 1) && (snk_2_b[b] == 1) && (snk_3_b[b] == 0)) {
+           B_re[b] = B2_r2_Bthird_re;  B_im[b] = B2_r2_Bthird_im;
+         }
+
       }
       if ((x1 == 0) && (x2 == 0))
          printf("perm %d is %d %d %d %d %d %d, sig %d \n", nperm, perms[index_2d(nperm,0 ,2*Nq_f)] , perms[index_2d(nperm,1 ,2*Nq_f)], perms[index_2d(nperm,2 ,2*Nq_f)], perms[index_2d(nperm,3 ,2*Nq_f)], perms[index_2d(nperm,4 ,2*Nq_f)], perms[index_2d(nperm,5 ,2*Nq_f)], sigs[nperm] );
@@ -525,245 +632,24 @@ void make_dibaryon_correlator(double* C_re,
          jS2 = snk_spin_weights[index_3d(snk_2_b[1],wnum,snk_2_nq[1] ,Nw2_f,Nq_f)];
          kC2 = snk_color_weights[index_3d(snk_3_b[1],wnum,snk_3_nq[1] ,Nw2_f,Nq_f)];
          kS2 = snk_spin_weights[index_3d(snk_3_b[1],wnum,snk_3_nq[1] ,Nw2_f,Nq_f)]; 
-         for (m=0; m<Nsrc_f; m++) {
-            std::complex<double> term(sigs[nperm] * overall_weight * snk_weights[wnum], 0);
-            b=0;
-               if ((src_spins[b] == 1) && (snk_1_b[b] == 0) && (snk_2_b[b] == 0) && (snk_3_b[b] == 0)) {
-                  std::complex<double> block(B1_r1_Blocal_re[Blocal_index(iC1,iS1,kC1,kS1,jC1,jS1,m ,Nc_f,Ns_f,Nsrc_f)], B1_r1_Blocal_im[Blocal_index(iC1,iS1,kC1,kS1,jC1,jS1,m ,Nc_f,Ns_f,Nsrc_f)]);
-                  new_term = term * block;
-                  if ((m == 0) && (x1 == 0) && (x2 == 0) && (wnum == 0)) {
-                     printf("r1 perms %d, B=%d, local x1 \n", nperm, b);
-                  }
-               }
-               else if ((src_spins[b] == 1) && (snk_1_b[b] == 1) && (snk_2_b[b] == 1) && (snk_3_b[b] == 1)) {
-                  std::complex<double> block(B2_r1_Blocal_re[Blocal_index(iC1,iS1,kC1,kS1,jC1,jS1,m ,Nc_f,Ns_f,Nsrc_f)], B2_r1_Blocal_im[Blocal_index(iC1,iS1,kC1,kS1,jC1,jS1,m ,Nc_f,Ns_f,Nsrc_f)]);
-                  new_term = term * block;
-                  if ((m == 0) && (x1 == 0) && (x2 == 0) && (wnum == 0)) {
-                     printf("r1 perms %d, B=%d, local x2 \n", nperm, b);
-                  }
-               }
-               else if ((src_spins[b] == 1) && (snk_1_b[b] == 0) && (snk_2_b[b] == 1) && (snk_3_b[b] == 0)) {
-                  std::complex<double> block(B1_r1_Bsecond_re[Blocal_index(iC1,iS1,kC1,kS1,jC1,jS1,m ,Nc_f,Ns_f,Nsrc_f)], B1_r1_Bsecond_im[Blocal_index(iC1,iS1,kC1,kS1,jC1,jS1,m ,Nc_f,Ns_f,Nsrc_f)]);
-                  new_term = term * block;
-                  if ((m == 0) && (x1 == 0) && (x2 == 0) && (wnum == 0)) {
-                     printf("r1 perms %d, B=%d, second x1 \n", nperm, b);
-                  }
-               }
-               else if ((src_spins[b] == 1) && (snk_1_b[b] == 1) && (snk_2_b[b] == 0) && (snk_3_b[b] == 1)) {
-                  std::complex<double> block(B2_r1_Bsecond_re[Blocal_index(iC1,iS1,kC1,kS1,jC1,jS1,m ,Nc_f,Ns_f,Nsrc_f)], B2_r1_Bsecond_im[Blocal_index(iC1,iS1,kC1,kS1,jC1,jS1,m ,Nc_f,Ns_f,Nsrc_f)]);
-                  new_term = term * block;
-                  if ((m == 0) && (x1 == 0) && (x2 == 0) && (wnum == 0)) {
-                     printf("r1 perms %d, B=%d, second x2 \n", nperm, b);
-                  }
-               }
-               else if ((src_spins[b] == 1) && (snk_1_b[b] == 1) && (snk_2_b[b] == 0) && (snk_3_b[b] == 0)) {
-                  std::complex<double> block(B1_r1_Bfirst_re[Blocal_index(iC1,iS1,kC1,kS1,jC1,jS1,m ,Nc_f,Ns_f,Nsrc_f)], B1_r1_Bfirst_im[Blocal_index(iC1,iS1,kC1,kS1,jC1,jS1,m ,Nc_f,Ns_f,Nsrc_f)]);
-                  new_term = term * block;
-                  if ((m == 0) && (x1 == 0) && (x2 == 0) && (wnum == 0)) {
-                     printf("r1 perms %d, B=%d, first x1 \n", nperm, b);
-                  }
-               }
-               else if ((src_spins[b] == 1) && (snk_1_b[b] == 0) && (snk_2_b[b] == 1) && (snk_3_b[b] == 1)) {
-                  std::complex<double> block(B2_r1_Bfirst_re[Blocal_index(iC1,iS1,kC1,kS1,jC1,jS1,m ,Nc_f,Ns_f,Nsrc_f)], B2_r1_Bfirst_im[Blocal_index(iC1,iS1,kC1,kS1,jC1,jS1,m ,Nc_f,Ns_f,Nsrc_f)]);
-                  new_term = term * block;
-                  if ((m == 0) && (x1 == 0) && (x2 == 0) && (wnum == 0)) {
-                     printf("r1 perms %d, B=%d, first x2 \n", nperm, b);
-                  }
-               }
-               else if ((src_spins[b] == 1) && (snk_1_b[b] == 0) && (snk_2_b[b] == 0) && (snk_3_b[b] == 1)) {
-                  std::complex<double> block(B1_r1_Bthird_re[Blocal_index(iC1,iS1,kC1,kS1,jC1,jS1,m ,Nc_f,Ns_f,Nsrc_f)], B1_r1_Bthird_im[Blocal_index(iC1,iS1,kC1,kS1,jC1,jS1,m ,Nc_f,Ns_f,Nsrc_f)]);
-                  new_term = term * block;
-                  if ((m == 0) && (x1 == 0) && (x2 == 0) && (wnum == 0)) {
-                     printf("r1 perms %d, B=%d, third x1 \n", nperm, b);
-                  }
-               }
-               else if ((src_spins[b] == 1) && (snk_1_b[b] == 1) && (snk_2_b[b] == 1) && (snk_3_b[b] == 0)) {
-                  std::complex<double> block(B2_r1_Bthird_re[Blocal_index(iC1,iS1,kC1,kS1,jC1,jS1,m ,Nc_f,Ns_f,Nsrc_f)], B2_r1_Bthird_im[Blocal_index(iC1,iS1,kC1,kS1,jC1,jS1,m ,Nc_f,Ns_f,Nsrc_f)]);
-                  new_term = term * block;
-                  if ((m == 0) && (x1 == 0) && (x2 == 0) && (wnum == 0)) {
-                     printf("r1 perms %d, B=%d, third x2 \n", nperm, b);
-                  }
-               }
-               else if ((src_spins[b] == 2) && (snk_1_b[b] == 0) && (snk_2_b[b] == 0) && (snk_3_b[b] == 0)) {
-                  std::complex<double> block(B1_r2_Blocal_re[Blocal_index(iC1,iS1,kC1,kS1,jC1,jS1,m ,Nc_f,Ns_f,Nsrc_f)], B1_r2_Blocal_im[Blocal_index(iC1,iS1,kC1,kS1,jC1,jS1,m ,Nc_f,Ns_f,Nsrc_f)]);
-                  new_term = term * block;
-                  if ((m == 0) && (x1 == 0) && (x2 == 0) && (wnum == 0)) {
-                     printf("r2 perms %d, B=%d, local x1 \n", nperm, b);
-                  }
-               }
-               else if ((src_spins[b] == 2) && (snk_1_b[b] == 1) && (snk_2_b[b] == 1) && (snk_3_b[b] == 1)) {
-                  std::complex<double> block(B2_r2_Blocal_re[Blocal_index(iC1,iS1,kC1,kS1,jC1,jS1,m ,Nc_f,Ns_f,Nsrc_f)], B2_r2_Blocal_im[Blocal_index(iC1,iS1,kC1,kS1,jC1,jS1,m ,Nc_f,Ns_f,Nsrc_f)]);
-                  new_term = term * block;
-                  if ((m == 0) && (x1 == 0) && (x2 == 0) && (wnum == 0)) {
-                     printf("r2 perms %d, B=%d, local x2 \n", nperm, b);
-                  }
-               }
-               else if ((src_spins[b] == 2) && (snk_1_b[b] == 0) && (snk_2_b[b] == 1) && (snk_3_b[b] == 0)) {
-                  std::complex<double> block(B1_r2_Bsecond_re[Blocal_index(iC1,iS1,kC1,kS1,jC1,jS1,m ,Nc_f,Ns_f,Nsrc_f)], B1_r2_Bsecond_im[Blocal_index(iC1,iS1,kC1,kS1,jC1,jS1,m ,Nc_f,Ns_f,Nsrc_f)]);
-                  new_term = term * block;
-                  if ((m == 0) && (x1 == 0) && (x2 == 0) && (wnum == 0)) {
-                     printf("r2 perms %d, B=%d, second x1 \n", nperm, b);
-                  }
-               }
-               else if ((src_spins[b] == 2) && (snk_1_b[b] == 1) && (snk_2_b[b] == 0) && (snk_3_b[b] == 1)) {
-                  std::complex<double> block(B2_r2_Bsecond_re[Blocal_index(iC1,iS1,kC1,kS1,jC1,jS1,m ,Nc_f,Ns_f,Nsrc_f)], B2_r2_Bsecond_im[Blocal_index(iC1,iS1,kC1,kS1,jC1,jS1,m ,Nc_f,Ns_f,Nsrc_f)]);
-                  new_term = term * block;
-                  if ((m == 0) && (x1 == 0) && (x2 == 0) && (wnum == 0)) {
-                     printf("r2 perms %d, B=%d, second x2 \n", nperm, b);
-                  }
-               }
-               else if ((src_spins[b] == 2) && (snk_1_b[b] == 1) && (snk_2_b[b] == 0) && (snk_3_b[b] == 0)) {
-                  std::complex<double> block(B1_r2_Bfirst_re[Blocal_index(iC1,iS1,kC1,kS1,jC1,jS1,m ,Nc_f,Ns_f,Nsrc_f)], B1_r2_Bfirst_im[Blocal_index(iC1,iS1,kC1,kS1,jC1,jS1,m ,Nc_f,Ns_f,Nsrc_f)]);
-                  new_term = term * block;
-                  if ((m == 0) && (x1 == 0) && (x2 == 0) && (wnum == 0)) {
-                     printf("r2 perms %d, B=%d, first x1 \n", nperm, b);
-                  }
-               }
-               else if ((src_spins[b] == 2) && (snk_1_b[b] == 0) && (snk_2_b[b] == 1) && (snk_3_b[b] == 1)) {
-                  std::complex<double> block(B2_r2_Bfirst_re[Blocal_index(iC1,iS1,kC1,kS1,jC1,jS1,m ,Nc_f,Ns_f,Nsrc_f)], B2_r2_Bfirst_im[Blocal_index(iC1,iS1,kC1,kS1,jC1,jS1,m ,Nc_f,Ns_f,Nsrc_f)]);
-                  new_term = term * block;
-                  if ((m == 0) && (x1 == 0) && (x2 == 0) && (wnum == 0)) {
-                     printf("r2 perms %d, B=%d, first x2 \n", nperm, b);
-                  }
-               }
-               else if ((src_spins[b] == 2) && (snk_1_b[b] == 0) && (snk_2_b[b] == 0) && (snk_3_b[b] == 1)) {
-                  std::complex<double> block(B1_r2_Bthird_re[Blocal_index(iC1,iS1,kC1,kS1,jC1,jS1,m ,Nc_f,Ns_f,Nsrc_f)], B1_r2_Bthird_im[Blocal_index(iC1,iS1,kC1,kS1,jC1,jS1,m ,Nc_f,Ns_f,Nsrc_f)]);
-                  new_term = term * block;
-                  if ((m == 0) && (x1 == 0) && (x2 == 0) && (wnum == 0)) {
-                     printf("r2 perms %d, B=%d, third x1 \n", nperm, b);
-                  }
-               }
-               else if ((src_spins[b] == 2) && (snk_1_b[b] == 1) && (snk_2_b[b] == 1) && (snk_3_b[b] == 0)) {
-                  std::complex<double> block(B2_r2_Bthird_re[Blocal_index(iC1,iS1,kC1,kS1,jC1,jS1,m ,Nc_f,Ns_f,Nsrc_f)], B2_r2_Bthird_im[Blocal_index(iC1,iS1,kC1,kS1,jC1,jS1,m ,Nc_f,Ns_f,Nsrc_f)]);
-                  new_term = term * block;
-                  if ((m == 0) && (x1 == 0) && (x2 == 0) && (wnum == 0)) {
-                     printf("r2 perms %d, B=%d, third x2 \n", nperm, b);
-                  }
-               }
-               term = new_term;
-            b=1;
-               if ((src_spins[b] == 1) && (snk_1_b[b] == 0) && (snk_2_b[b] == 0) && (snk_3_b[b] == 0)) {
-                  std::complex<double> block(B1_r1_Blocal_re[Blocal_index(iC2,iS2,kC2,kS2,jC2,jS2,m ,Nc_f,Ns_f,Nsrc_f)], B1_r1_Blocal_im[Blocal_index(iC2,iS2,kC2,kS2,jC2,jS2,m ,Nc_f,Ns_f,Nsrc_f)]);
-                  new_term = term * block;
-                  if ((m == 0) && (x1 == 0) && (x2 == 0) && (wnum == 0)) {
-                     printf("src spins = %d, r1 perms %d, B=%d, local x1 \n", src_spins[b], nperm, b);
-                  }
-               }
-               else if ((src_spins[b] == 1) && (snk_1_b[b] == 1) && (snk_2_b[b] == 1) && (snk_3_b[b] == 1)) {
-                  std::complex<double> block(B2_r1_Blocal_re[Blocal_index(iC2,iS2,kC2,kS2,jC2,jS2,m ,Nc_f,Ns_f,Nsrc_f)], B2_r1_Blocal_im[Blocal_index(iC2,iS2,kC2,kS2,jC2,jS2,m ,Nc_f,Ns_f,Nsrc_f)]);
-                  new_term = term * block;
-                  if ((m == 0) && (x1 == 0) && (x2 == 0) && (wnum == 0)) {
-                     printf("src spins = %d, r1 perms %d, B=%d, local x2 \n", src_spins[b], nperm, b);
-                  }
-               }
-               else if ((src_spins[b] == 1) && (snk_1_b[b] == 0) && (snk_2_b[b] == 1) && (snk_3_b[b] == 0)) {
-                  std::complex<double> block(B1_r1_Bsecond_re[Blocal_index(iC2,iS2,kC2,kS2,jC2,jS2,m ,Nc_f,Ns_f,Nsrc_f)], B1_r1_Bsecond_im[Blocal_index(iC2,iS2,kC2,kS2,jC2,jS2,m ,Nc_f,Ns_f,Nsrc_f)]);
-                  new_term = term * block;
-                  if ((m == 0) && (x1 == 0) && (x2 == 0) && (wnum == 0)) {
-                     printf("src spins = %d, r1 perms %d, B=%d, second x1 \n", src_spins[b], nperm, b);
-                  }
-               }
-               else if ((src_spins[b] == 1) && (snk_1_b[b] == 1) && (snk_2_b[b] == 0) && (snk_3_b[b] == 1)) {
-                  std::complex<double> block(B2_r1_Bsecond_re[Blocal_index(iC2,iS2,kC2,kS2,jC2,jS2,m ,Nc_f,Ns_f,Nsrc_f)], B2_r1_Bsecond_im[Blocal_index(iC2,iS2,kC2,kS2,jC2,jS2,m ,Nc_f,Ns_f,Nsrc_f)]);
-                  new_term = term * block;
-                  if ((m == 0) && (x1 == 0) && (x2 == 0) && (wnum == 0)) {
-                     printf("src spins = %d, r1 perms %d, B=%d, second x2 \n", src_spins[b], nperm, b);
-                  }
-               }
-               else if ((src_spins[b] == 1) && (snk_2_b[b] == 0) && (snk_3_b[b] == 0)) {
-                  std::complex<double> block(B1_r1_Bfirst_re[Blocal_index(iC2,iS2,kC2,kS2,jC2,jS2,m ,Nc_f,Ns_f,Nsrc_f)], B1_r1_Bfirst_im[Blocal_index(iC2,iS2,kC2,kS2,jC2,jS2,m ,Nc_f,Ns_f,Nsrc_f)]);
-                  new_term = term * block;
-                  if ((m == 0) && (x1 == 0) && (x2 == 0) && (wnum == 0)) {
-                     printf("src spins = %d, r1 perms %d, B=%d, first x1 \n", src_spins[b], nperm, b);
-                  }
-               }
-               else if ((src_spins[b] == 1) && (snk_1_b[b] == 0) && (snk_2_b[b] == 1) && (snk_3_b[b] == 1)) {
-                  std::complex<double> block(B2_r1_Bfirst_re[Blocal_index(iC2,iS2,kC2,kS2,jC2,jS2,m ,Nc_f,Ns_f,Nsrc_f)], B2_r1_Bfirst_im[Blocal_index(iC2,iS2,kC2,kS2,jC2,jS2,m ,Nc_f,Ns_f,Nsrc_f)]);
-                  new_term = term * block;
-                  if ((m == 0) && (x1 == 0) && (x2 == 0) && (wnum == 0)) {
-                     printf("src spins = %d, r1 perms %d, B=%d, first x2 \n", src_spins[b], nperm, b);
-                  }
-               }
-               else if ((src_spins[b] == 1) && (snk_1_b[b] == 0) && (snk_2_b[b] == 0) && (snk_3_b[b] == 1)) {
-                  std::complex<double> block(B1_r1_Bthird_re[Blocal_index(iC2,iS2,kC2,kS2,jC2,jS2,m ,Nc_f,Ns_f,Nsrc_f)], B1_r1_Bthird_im[Blocal_index(iC2,iS2,kC2,kS2,jC2,jS2,m ,Nc_f,Ns_f,Nsrc_f)]);
-                  new_term = term * block;
-                  if ((m == 0) && (x1 == 0) && (x2 == 0) && (wnum == 0)) {
-                     printf("src spins = %d, r1 perms %d, B=%d, third x1 \n", src_spins[b], nperm, b);
-                  }
-               }
-               else if ((src_spins[b] == 1) && (snk_1_b[b] == 1) && (snk_2_b[b] == 1) && (snk_3_b[b] == 0)) {
-                  std::complex<double> block(B2_r1_Bthird_re[Blocal_index(iC2,iS2,kC2,kS2,jC2,jS2,m ,Nc_f,Ns_f,Nsrc_f)], B2_r1_Bthird_im[Blocal_index(iC2,iS2,kC2,kS2,jC2,jS2,m ,Nc_f,Ns_f,Nsrc_f)]);
-                  new_term = term * block;
-                  if ((m == 0) && (x1 == 0) && (x2 == 0) && (wnum == 0)) {
-                     printf("src spins = %d, r1 perms %d, B=%d, third x2 \n", src_spins[b], nperm, b);
-                  }
-               }
-               else if ((src_spins[b] == 2) && (snk_1_b[b] == 0) && (snk_2_b[b] == 0) && (snk_3_b[b] == 0)) {
-                  std::complex<double> block(B1_r2_Blocal_re[Blocal_index(iC2,iS2,kC2,kS2,jC2,jS2,m ,Nc_f,Ns_f,Nsrc_f)], B1_r2_Blocal_im[Blocal_index(iC2,iS2,kC2,kS2,jC2,jS2,m ,Nc_f,Ns_f,Nsrc_f)]);
-                  new_term = term * block;
-                  if ((m == 0) && (x1 == 0) && (x2 == 0) && (wnum == 0)) {
-                     printf("src spins = %d, r2 perms %d, B=%d, local x1 \n", src_spins[b], nperm, b);
-                  }
-               }
-               else if ((src_spins[b] == 2) && (snk_1_b[b] == 1) && (snk_2_b[b] == 1) && (snk_3_b[b] == 1)) {
-                  std::complex<double> block(B2_r2_Blocal_re[Blocal_index(iC2,iS2,kC2,kS2,jC2,jS2,m ,Nc_f,Ns_f,Nsrc_f)], B2_r2_Blocal_im[Blocal_index(iC2,iS2,kC2,kS2,jC2,jS2,m ,Nc_f,Ns_f,Nsrc_f)]);
-                  new_term = term * block;
-                  if ((m == 0) && (x1 == 0) && (x2 == 0) && (wnum == 0)) {
-                     printf("src spins = %d, r2 perms %d, B=%d, local x2 \n", src_spins[b], nperm, b);
-                  }
-               }
-               else if ((src_spins[b] == 2) && (snk_1_b[b] == 0) && (snk_2_b[b] == 1) && (snk_3_b[b] == 0)) {
-                  std::complex<double> block(B1_r2_Bsecond_re[Blocal_index(iC2,iS2,kC2,kS2,jC2,jS2,m ,Nc_f,Ns_f,Nsrc_f)], B1_r2_Bsecond_im[Blocal_index(iC2,iS2,kC2,kS2,jC2,jS2,m ,Nc_f,Ns_f,Nsrc_f)]);
-                  new_term = term * block;
-                  if ((m == 0) && (x1 == 0) && (x2 == 0) && (wnum == 0)) {
-                     printf("src spins = %d, r2 perms %d, B=%d, second x1 \n", src_spins[b], nperm, b);
-                  }
-               }
-               else if ((src_spins[b] == 2) && (snk_1_b[b] == 1) && (snk_2_b[b] == 0) && (snk_3_b[b] == 1)) {
-                  std::complex<double> block(B2_r2_Bsecond_re[Blocal_index(iC2,iS2,kC2,kS2,jC2,jS2,m ,Nc_f,Ns_f,Nsrc_f)], B2_r2_Bsecond_im[Blocal_index(iC2,iS2,kC2,kS2,jC2,jS2,m ,Nc_f,Ns_f,Nsrc_f)]);
-                  new_term = term * block;
-                  if ((m == 0) && (x1 == 0) && (x2 == 0) && (wnum == 0)) {
-                     printf("src spins = %d, r2 perms %d, B=%d, second x2 \n", src_spins[b], nperm, b);
-                  }
-               }
-               else if ((src_spins[b] == 2) && (snk_1_b[b] == 1) && (snk_2_b[b] == 0) && (snk_3_b[b] == 0)) {
-                  std::complex<double> block(B1_r2_Bfirst_re[Blocal_index(iC2,iS2,kC2,kS2,jC2,jS2,m ,Nc_f,Ns_f,Nsrc_f)], B1_r2_Bfirst_im[Blocal_index(iC2,iS2,kC2,kS2,jC2,jS2,m ,Nc_f,Ns_f,Nsrc_f)]);
-                  new_term = term * block;
-                  if ((m == 0) && (x1 == 0) && (x2 == 0) && (wnum == 0)) {
-                     printf("src spins = %d, r2 perms %d, B=%d, first x1 \n", src_spins[b], nperm, b);
-                  }
-               }
-               else if ((src_spins[b] == 2) && (snk_1_b[b] == 0) && (snk_2_b[b] == 1) && (snk_3_b[b] == 1)) {
-                  std::complex<double> block(B2_r2_Bfirst_re[Blocal_index(iC2,iS2,kC2,kS2,jC2,jS2,m ,Nc_f,Ns_f,Nsrc_f)], B2_r2_Bfirst_im[Blocal_index(iC2,iS2,kC2,kS2,jC2,jS2,m ,Nc_f,Ns_f,Nsrc_f)]);
-                  new_term = term * block;
-                  if ((m == 0) && (x1 == 0) && (x2 == 0) && (wnum == 0)) {
-                     printf("src spins = %d, r2 perms %d, B=%d, first x2 \n", src_spins[b], nperm, b);
-                  }
-               }
-               else if ((src_spins[b] == 2) && (snk_1_b[b] == 0) && (snk_2_b[b] == 0) && (snk_3_b[b] == 1)) {
-                  std::complex<double> block(B1_r2_Bthird_re[Blocal_index(iC2,iS2,kC2,kS2,jC2,jS2,m ,Nc_f,Ns_f,Nsrc_f)], B1_r2_Bthird_im[Blocal_index(iC2,iS2,kC2,kS2,jC2,jS2,m ,Nc_f,Ns_f,Nsrc_f)]);
-                  new_term = term * block;
-                  if ((m == 0) && (x1 == 0) && (x2 == 0) && (wnum == 0)) {
-                     printf("src spins = %d, r2 perms %d, B=%d, third x1 \n", src_spins[b], nperm, b);
-                  }
-               }
-               else if ((src_spins[b] == 2) && (snk_1_b[b] == 1) && (snk_2_b[b] == 1) && (snk_3_b[b] == 0)) {
-                  std::complex<double> block(B2_r2_Bthird_re[Blocal_index(iC2,iS2,kC2,kS2,jC2,jS2,m ,Nc_f,Ns_f,Nsrc_f)], B2_r2_Bthird_im[Blocal_index(iC2,iS2,kC2,kS2,jC2,jS2,m ,Nc_f,Ns_f,Nsrc_f)]);
-                  new_term = term * block;
-                  if ((m == 0) && (x1 == 0) && (x2 == 0) && (wnum == 0)) {
-                     printf("src spins = %d, r2 perms %d, B=%d, third x2 \n", src_spins[b], nperm, b);
-                  }
-               }
-               term = new_term;
-            for (n=0; n<Nsnk_f; n++) {
-               std::complex<double> psi(snk_psi_re[index_3d(x1,x2,n ,Vsnk_f,Nsnk_f)], snk_psi_im[index_3d(x1,x2,n ,Vsnk_f,Nsnk_f)]);
-               std::complex<double> corr = term * psi;
-               C_re[index_3d(m,n,t,Nsnk_f,Nt_f)] += real(corr);
-               C_im[index_3d(m,n,t,Nsnk_f,Nt_f)] += imag(corr);
-            }
+         int index_1 = Blocal_index(iC1,iS1,kC1,kS1,jC1,jS1,0,Nc_f,Ns_f,Nsrc_f);
+         int index_2 = Blocal_index(iC2,iS2,kC2,kS2,jC2,jS2,0,Nc_f,Ns_f,Nsrc_f);
+         double prefactor = sigs[nperm] * overall_weight * snk_weights[wnum];
+         for (m=0; m < Nsrc_f; m ++) {
+            sum_re[m] += prefactor * (B_re[0][index_1 + m] * B_re[1][index_2 + m] - B_im[0][index_1 + m] * B_im[1][index_2 + m]);
+            sum_im[m] += prefactor * (B_im[0][index_1 + m] * B_re[1][index_2 + m] + B_re[0][index_1 + m] * B_im[1][index_2 + m]);
          }
       }
-   } 
+   }
+   for (int m = 0; m < Nsrc_f; m ++) {
+      for (n=0; n<Nsnk_f; n++) {
+         double psi_re = snk_psi_re[index_3d(x1,x2,n ,Vsnk_f,Nsnk_f)];
+         double psi_im = snk_psi_im[index_3d(x1,x2,n ,Vsnk_f,Nsnk_f)];
+         C_re[index_3d(m,n,t,Nsnk_f,Nt_f)] += sum_re[m] * psi_re - sum_im[m] * psi_im;
+         C_im[index_3d(m,n,t,Nsnk_f,Nt_f)] += sum_im[m] * psi_re + sum_re[m] * psi_im;
+      }
+   }
+   correlator_time += clock();
 }
 
 void make_dibaryon_hex_correlator(double* C_re,
@@ -1093,6 +979,8 @@ void make_two_nucleon_2pt(double* C_re,
     const int Nsrc_fHex,
     const int Nsnk_fHex,
     const int Nperms_f) {
+      total_time -= clock();
+      printf("Running reference code with Vsrc = %d, Nw = %d, Nsrc = %d\n", Vsrc_f, Nw_f, Nsrc_f);
    /* indices */
    double overall_weight = 1.0/2.0;
    int nB1, nB2, nq, n, m, t, x1, x2, x, y;
@@ -1321,6 +1209,7 @@ void make_two_nucleon_2pt(double* C_re,
                make_second_block(B1_Bsecond_r2_re, B1_Bsecond_r2_im, B1_Blocal_r2_re, B1_Blocal_r2_im, B1_prop_re, B1_prop_im, src_color_weights_r2, src_spin_weights_r2, src_weights_r2, src_psi_B1_re, src_psi_B1_im, t, x1, x2, Nc_f,Ns_f,Vsrc_f,Vsnk_f,Nt_f,Nw_f,Nq_f,Nsrc_f);
                make_third_block(B1_Bthird_r1_re, B1_Bthird_r1_im, B1_prop_re, B1_prop_im, src_color_weights_r1, src_spin_weights_r1, src_weights_r1, src_psi_B1_re, src_psi_B1_im, t, x1, x2, Nc_f,Ns_f,Vsrc_f,Vsnk_f,Nt_f,Nw_f,Nq_f,Nsrc_f);
                make_third_block(B1_Bthird_r2_re, B1_Bthird_r2_im, B1_prop_re, B1_prop_im, src_color_weights_r2, src_spin_weights_r2, src_weights_r2, src_psi_B1_re, src_psi_B1_im, t, x1, x2, Nc_f,Ns_f,Vsrc_f,Vsnk_f,Nt_f,Nw_f,Nq_f,Nsrc_f);
+
                make_first_block(B2_Bfirst_r1_re, B2_Bfirst_r1_im, B2_prop_re, B2_prop_im, src_color_weights_r1, src_spin_weights_r1, src_weights_r1, src_psi_B2_re, src_psi_B2_im, t, x2, x1, Nc_f,Ns_f,Vsrc_f,Vsnk_f,Nt_f,Nw_f,Nq_f,Nsrc_f);
                make_first_block(B2_Bfirst_r2_re, B2_Bfirst_r2_im, B2_prop_re, B2_prop_im, src_color_weights_r2, src_spin_weights_r2, src_weights_r2, src_psi_B2_re, src_psi_B2_im, t, x2, x1, Nc_f,Ns_f,Vsrc_f,Vsnk_f,Nt_f,Nw_f,Nq_f,Nsrc_f);
                make_second_block(B2_Bsecond_r1_re, B2_Bsecond_r1_im, B2_Blocal_r1_re, B2_Blocal_r1_im, B2_prop_re, B2_prop_im, src_color_weights_r1, src_spin_weights_r1, src_weights_r1, src_psi_B2_re, src_psi_B2_im, t, x2, x1, Nc_f,Ns_f,Vsrc_f,Vsnk_f,Nt_f,Nw_f,Nq_f,Nsrc_f);
@@ -1351,6 +1240,30 @@ void make_two_nucleon_2pt(double* C_re,
                src_spins[0] = 2;
                src_spins[1] = 2;
                make_dibaryon_correlator(BB_r3_re, BB_r3_im, B1_Blocal_r1_re, B1_Blocal_r1_im, B1_Bfirst_r1_re, B1_Bfirst_r1_im, B1_Bsecond_r1_re, B1_Bsecond_r1_im, B1_Bthird_r1_re, B1_Bthird_r1_im, B2_Blocal_r1_re, B2_Blocal_r1_im, B2_Bfirst_r1_re, B2_Bfirst_r1_im, B2_Bsecond_r1_re, B2_Bsecond_r1_im, B2_Bthird_r1_re, B2_Bthird_r1_im, B1_Blocal_r2_re, B1_Blocal_r2_im, B1_Bfirst_r2_re, B1_Bfirst_r2_im, B1_Bsecond_r2_re, B1_Bsecond_r2_im, B1_Bthird_r2_re, B1_Bthird_r2_im, B2_Blocal_r2_re, B2_Blocal_r2_im, B2_Bfirst_r2_re, B2_Bfirst_r2_im, B2_Bsecond_r2_re, B2_Bsecond_r2_im, B2_Bthird_r2_re, B2_Bthird_r2_im, src_spins, perms, sigs, overall_weight, snk_color_weights_r3, snk_spin_weights_r3, snk_weights_r3, snk_psi_re, snk_psi_im, t, x1, x2, Nc_f,Ns_f,Vsrc_f,Vsnk_f,Nt_f,Nw_f,Nq_f,Nsrc_f,Nsnk_f,Nperms_f);
+               #if 0
+               if (x1 != x2) {
+               make_dibaryon_correlator(BB_0_re, BB_0_im, B2_Blocal_r1_re, B2_Blocal_r1_im, B2_Bfirst_r1_re, B2_Bfirst_r1_im, B2_Bsecond_r1_re, B2_Bsecond_r1_im, B2_Bthird_r1_re, B2_Bthird_r1_im, B1_Blocal_r1_re, B1_Blocal_r1_im, B1_Bfirst_r1_re, B1_Bfirst_r1_im, B1_Bsecond_r1_re, B1_Bsecond_r1_im, B1_Bthird_r1_re, B1_Bthird_r1_im, B2_Blocal_r2_re, B2_Blocal_r2_im, B2_Bfirst_r2_re, B2_Bfirst_r2_im, B2_Bsecond_r2_re, B2_Bsecond_r2_im, B2_Bthird_r2_re, B2_Bthird_r2_im, B1_Blocal_r2_re, B1_Blocal_r2_im, B1_Bfirst_r2_re, B1_Bfirst_r2_im, B1_Bsecond_r2_re, B1_Bsecond_r2_im, B1_Bthird_r2_re, B1_Bthird_r2_im, src_spins, perms, sigs, overall_weight/sqrt(2.0), snk_color_weights_1, snk_spin_weights_1, snk_weights_1, snk_psi_re, snk_psi_im, t, x2, x1, Nc_f,Ns_f,Vsrc_f,Vsnk_f,Nt_f,Nw_f,Nq_f,Nsrc_f,Nsnk_f,Nperms_f);
+               make_dibaryon_correlator(BB_0_re, BB_0_im, B2_Blocal_r1_re, B2_Blocal_r1_im, B2_Bfirst_r1_re, B2_Bfirst_r1_im, B2_Bsecond_r1_re, B2_Bsecond_r1_im, B2_Bthird_r1_re, B2_Bthird_r1_im, B1_Blocal_r1_re, B1_Blocal_r1_im, B1_Bfirst_r1_re, B1_Bfirst_r1_im, B1_Bsecond_r1_re, B1_Bsecond_r1_im, B1_Bthird_r1_re, B1_Bthird_r1_im, B2_Blocal_r2_re, B2_Blocal_r2_im, B2_Bfirst_r2_re, B2_Bfirst_r2_im, B2_Bsecond_r2_re, B2_Bsecond_r2_im, B2_Bthird_r2_re, B2_Bthird_r2_im, B1_Blocal_r2_re, B1_Blocal_r2_im, B1_Bfirst_r2_re, B1_Bfirst_r2_im, B1_Bsecond_r2_re, B1_Bsecond_r2_im, B1_Bthird_r2_re, B1_Bthird_r2_im, src_spins, perms, sigs, overall_weight/sqrt(2.0), snk_color_weights_2, snk_spin_weights_2, snk_weights_2, snk_psi_re, snk_psi_im, t, x2, x1, Nc_f,Ns_f,Vsrc_f,Vsnk_f,Nt_f,Nw_f,Nq_f,Nsrc_f,Nsnk_f,Nperms_f);
+               src_spins[0] = 2;
+               src_spins[1] = 1;
+               make_dibaryon_correlator(BB_0_re, BB_0_im, B2_Blocal_r1_re, B2_Blocal_r1_im, B2_Bfirst_r1_re, B2_Bfirst_r1_im, B2_Bsecond_r1_re, B2_Bsecond_r1_im, B2_Bthird_r1_re, B2_Bthird_r1_im, B1_Blocal_r1_re, B1_Blocal_r1_im, B1_Bfirst_r1_re, B1_Bfirst_r1_im, B1_Bsecond_r1_re, B1_Bsecond_r1_im, B1_Bthird_r1_re, B1_Bthird_r1_im, B2_Blocal_r2_re, B2_Blocal_r2_im, B2_Bfirst_r2_re, B2_Bfirst_r2_im, B2_Bsecond_r2_re, B2_Bsecond_r2_im, B2_Bthird_r2_re, B2_Bthird_r2_im, B1_Blocal_r2_re, B1_Blocal_r2_im, B1_Bfirst_r2_re, B1_Bfirst_r2_im, B1_Bsecond_r2_re, B1_Bsecond_r2_im, B1_Bthird_r2_re, B1_Bthird_r2_im, src_spins, perms, sigs, -1.0*overall_weight/sqrt(2.0), snk_color_weights_1, snk_spin_weights_1, snk_weights_1, snk_psi_re, snk_psi_im, t, x2, x1, Nc_f,Ns_f,Vsrc_f,Vsnk_f,Nt_f,Nw_f,Nq_f,Nsrc_f,Nsnk_f,Nperms_f);
+               make_dibaryon_correlator(BB_0_re, BB_0_im, B2_Blocal_r1_re, B2_Blocal_r1_im, B2_Bfirst_r1_re, B2_Bfirst_r1_im, B2_Bsecond_r1_re, B2_Bsecond_r1_im, B2_Bthird_r1_re, B2_Bthird_r1_im, B1_Blocal_r1_re, B1_Blocal_r1_im, B1_Bfirst_r1_re, B1_Bfirst_r1_im, B1_Bsecond_r1_re, B1_Bsecond_r1_im, B1_Bthird_r1_re, B1_Bthird_r1_im, B2_Blocal_r2_re, B2_Blocal_r2_im, B2_Bfirst_r2_re, B2_Bfirst_r2_im, B2_Bsecond_r2_re, B2_Bsecond_r2_im, B2_Bthird_r2_re, B2_Bthird_r2_im, B1_Blocal_r2_re, B1_Blocal_r2_im, B1_Bfirst_r2_re, B1_Bfirst_r2_im, B1_Bsecond_r2_re, B1_Bsecond_r2_im, B1_Bthird_r2_re, B1_Bthird_r2_im, src_spins, perms, sigs, -1.0*overall_weight/sqrt(2.0), snk_color_weights_2, snk_spin_weights_2, snk_weights_2, snk_psi_re, snk_psi_im, t, x2, x1, Nc_f,Ns_f,Vsrc_f,Vsnk_f,Nt_f,Nw_f,Nq_f,Nsrc_f,Nsnk_f,Nperms_f);
+               src_spins[0] = 1;
+               src_spins[1] = 1;
+               make_dibaryon_correlator(BB_r1_re, BB_r1_im, B2_Blocal_r1_re, B2_Blocal_r1_im, B2_Bfirst_r1_re, B2_Bfirst_r1_im, B2_Bsecond_r1_re, B2_Bsecond_r1_im, B2_Bthird_r1_re, B2_Bthird_r1_im, B1_Blocal_r1_re, B1_Blocal_r1_im, B1_Bfirst_r1_re, B1_Bfirst_r1_im, B1_Bsecond_r1_re, B1_Bsecond_r1_im, B1_Bthird_r1_re, B1_Bthird_r1_im, B2_Blocal_r2_re, B2_Blocal_r2_im, B2_Bfirst_r2_re, B2_Bfirst_r2_im, B2_Bsecond_r2_re, B2_Bsecond_r2_im, B2_Bthird_r2_re, B2_Bthird_r2_im, B1_Blocal_r2_re, B1_Blocal_r2_im, B1_Bfirst_r2_re, B1_Bfirst_r2_im, B1_Bsecond_r2_re, B1_Bsecond_r2_im, B1_Bthird_r2_re, B1_Bthird_r2_im, src_spins, perms, sigs, overall_weight, snk_color_weights_r1, snk_spin_weights_r1, snk_weights_r1, snk_psi_re, snk_psi_im, t, x2, x1, Nc_f,Ns_f,Vsrc_f,Vsnk_f,Nt_f,Nw_f,Nq_f,Nsrc_f,Nsnk_f,Nperms_f);
+               src_spins[0] = 1;
+               src_spins[1] = 2;
+               make_dibaryon_correlator(BB_r2_re, BB_r2_im, B2_Blocal_r1_re, B2_Blocal_r1_im, B2_Bfirst_r1_re, B2_Bfirst_r1_im, B2_Bsecond_r1_re, B2_Bsecond_r1_im, B2_Bthird_r1_re, B2_Bthird_r1_im, B1_Blocal_r1_re, B1_Blocal_r1_im, B1_Bfirst_r1_re, B1_Bfirst_r1_im, B1_Bsecond_r1_re, B1_Bsecond_r1_im, B1_Bthird_r1_re, B1_Bthird_r1_im, B2_Blocal_r2_re, B2_Blocal_r2_im, B2_Bfirst_r2_re, B2_Bfirst_r2_im, B2_Bsecond_r2_re, B2_Bsecond_r2_im, B2_Bthird_r2_re, B2_Bthird_r2_im, B1_Blocal_r2_re, B1_Blocal_r2_im, B1_Bfirst_r2_re, B1_Bfirst_r2_im, B1_Bsecond_r2_re, B1_Bsecond_r2_im, B1_Bthird_r2_re, B1_Bthird_r2_im, src_spins, perms, sigs, overall_weight/sqrt(2.0), snk_color_weights_r2_1, snk_spin_weights_r2_1, snk_weights_r2_1, snk_psi_re, snk_psi_im, t, x2, x1,  Nc_f,Ns_f,Vsrc_f,Vsnk_f,Nt_f,Nw_f,Nq_f,Nsrc_f,Nsnk_f,Nperms_f);
+               make_dibaryon_correlator(BB_r2_re, BB_r2_im, B2_Blocal_r1_re, B2_Blocal_r1_im, B2_Bfirst_r1_re, B2_Bfirst_r1_im, B2_Bsecond_r1_re, B2_Bsecond_r1_im, B2_Bthird_r1_re, B2_Bthird_r1_im, B1_Blocal_r1_re, B1_Blocal_r1_im, B1_Bfirst_r1_re, B1_Bfirst_r1_im, B1_Bsecond_r1_re, B1_Bsecond_r1_im, B1_Bthird_r1_re, B1_Bthird_r1_im, B2_Blocal_r2_re, B2_Blocal_r2_im, B2_Bfirst_r2_re, B2_Bfirst_r2_im, B2_Bsecond_r2_re, B2_Bsecond_r2_im, B2_Bthird_r2_re, B2_Bthird_r2_im, B1_Blocal_r2_re, B1_Blocal_r2_im, B1_Bfirst_r2_re, B1_Bfirst_r2_im, B1_Bsecond_r2_re, B1_Bsecond_r2_im, B1_Bthird_r2_re, B1_Bthird_r2_im, src_spins, perms, sigs, overall_weight/sqrt(2.0), snk_color_weights_r2_2, snk_spin_weights_r2_2, snk_weights_r2_2, snk_psi_re, snk_psi_im, t, x2, x1, Nc_f,Ns_f,Vsrc_f,Vsnk_f,Nt_f,Nw_f,Nq_f,Nsrc_f,Nsnk_f,Nperms_f);
+               src_spins[0] = 2;
+               src_spins[1] = 1;
+               make_dibaryon_correlator(BB_r2_re, BB_r2_im, B2_Blocal_r1_re, B2_Blocal_r1_im, B2_Bfirst_r1_re, B2_Bfirst_r1_im, B2_Bsecond_r1_re, B2_Bsecond_r1_im, B2_Bthird_r1_re, B2_Bthird_r1_im, B1_Blocal_r1_re, B1_Blocal_r1_im, B1_Bfirst_r1_re, B1_Bfirst_r1_im, B1_Bsecond_r1_re, B1_Bsecond_r1_im, B1_Bthird_r1_re, B1_Bthird_r1_im, B2_Blocal_r2_re, B2_Blocal_r2_im, B2_Bfirst_r2_re, B2_Bfirst_r2_im, B2_Bsecond_r2_re, B2_Bsecond_r2_im, B2_Bthird_r2_re, B2_Bthird_r2_im, B1_Blocal_r2_re, B1_Blocal_r2_im, B1_Bfirst_r2_re, B1_Bfirst_r2_im, B1_Bsecond_r2_re, B1_Bsecond_r2_im, B1_Bthird_r2_re, B1_Bthird_r2_im, src_spins, perms, sigs, overall_weight/sqrt(2.0), snk_color_weights_r2_1, snk_spin_weights_r2_1, snk_weights_r2_1, snk_psi_re, snk_psi_im, t, x2, x1, Nc_f,Ns_f,Vsrc_f,Vsnk_f,Nt_f,Nw_f,Nq_f,Nsrc_f,Nsnk_f,Nperms_f);
+               make_dibaryon_correlator(BB_r2_re, BB_r2_im, B2_Blocal_r1_re, B2_Blocal_r1_im, B2_Bfirst_r1_re, B2_Bfirst_r1_im, B2_Bsecond_r1_re, B2_Bsecond_r1_im, B2_Bthird_r1_re, B2_Bthird_r1_im, B1_Blocal_r1_re, B1_Blocal_r1_im, B1_Bfirst_r1_re, B1_Bfirst_r1_im, B1_Bsecond_r1_re, B1_Bsecond_r1_im, B1_Bthird_r1_re, B1_Bthird_r1_im, B2_Blocal_r2_re, B2_Blocal_r2_im, B2_Bfirst_r2_re, B2_Bfirst_r2_im, B2_Bsecond_r2_re, B2_Bsecond_r2_im, B2_Bthird_r2_re, B2_Bthird_r2_im, B1_Blocal_r2_re, B1_Blocal_r2_im, B1_Bfirst_r2_re, B1_Bfirst_r2_im, B1_Bsecond_r2_re, B1_Bsecond_r2_im, B1_Bthird_r2_re, B1_Bthird_r2_im, src_spins, perms, sigs, overall_weight/sqrt(2.0), snk_color_weights_r2_2, snk_spin_weights_r2_2, snk_weights_r2_2, snk_psi_re, snk_psi_im, t, x2, x1, Nc_f,Ns_f,Vsrc_f,Vsnk_f,Nt_f,Nw_f,Nq_f,Nsrc_f,Nsnk_f,Nperms_f);
+               src_spins[0] = 2;
+               src_spins[1] = 2;
+               make_dibaryon_correlator(BB_r3_re, BB_r3_im, B2_Blocal_r1_re, B2_Blocal_r1_im, B2_Bfirst_r1_re, B2_Bfirst_r1_im, B2_Bsecond_r1_re, B2_Bsecond_r1_im, B2_Bthird_r1_re, B2_Bthird_r1_im, B1_Blocal_r1_re, B1_Blocal_r1_im, B1_Bfirst_r1_re, B1_Bfirst_r1_im, B1_Bsecond_r1_re, B1_Bsecond_r1_im, B1_Bthird_r1_re, B1_Bthird_r1_im, B2_Blocal_r2_re, B2_Blocal_r2_im, B2_Bfirst_r2_re, B2_Bfirst_r2_im, B2_Bsecond_r2_re, B2_Bsecond_r2_im, B2_Bthird_r2_re, B2_Bthird_r2_im, B1_Blocal_r2_re, B1_Blocal_r2_im, B1_Bfirst_r2_re, B1_Bfirst_r2_im, B1_Bsecond_r2_re, B1_Bsecond_r2_im, B1_Bthird_r2_re, B1_Bthird_r2_im, src_spins, perms, sigs, overall_weight, snk_color_weights_r3, snk_spin_weights_r3, snk_weights_r3, snk_psi_re, snk_psi_im, t, x2, x1, Nc_f,Ns_f,Vsrc_f,Vsnk_f,Nt_f,Nw_f,Nq_f,Nsrc_f,Nsnk_f,Nperms_f);
+               }
+               #endif
             }
          }
          for (m=0; m<Nsrc_f; m++) {
@@ -1548,5 +1461,11 @@ void make_two_nucleon_2pt(double* C_re,
    free(H_BB_r2_im);
    free(H_BB_r3_re);
    free(H_BB_r3_im);
+   total_time += clock();
+   printf("Time in make_first_block: %f\n", ((float) first_block_time) / CLOCKS_PER_SEC);
+   printf("Time in make_second_block: %f\n", ((float) second_block_time) / CLOCKS_PER_SEC);
+   printf("Time in make_third_block: %f\n", ((float) third_block_time) / CLOCKS_PER_SEC);
+   printf("Time in make_dibaryon_correlator: %f\n", ((float) correlator_time) / CLOCKS_PER_SEC);
+   printf("Total time: %f\n", ((float) total_time) / CLOCKS_PER_SEC);
 }
 
