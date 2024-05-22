@@ -71,8 +71,7 @@ int Blocal_index(int c1, int s1, int c2, int s2, int c3, int s3, int m, int Nc_f
 }
 
 // timers
-clock_t local_block_time;
-clock_t nonlocal_block_time;
+clock_t block_time;
 clock_t correlator_time;
 clock_t total_time;
 
@@ -162,7 +161,7 @@ void make_block(double* B_re,
     const int Nw_f,
     const int Nq_f,
     const int Nsrc_f) {
-   nonlocal_block_time -= clock();
+   block_time -= clock();
    assert(Nc == Nc_f);
    assert(Ns == Ns_f);
    /* loop indices */
@@ -235,7 +234,7 @@ void make_block(double* B_re,
          }
       }
    }
-   nonlocal_block_time += clock();
+   block_time += clock();
 }
 
 void make_local_block(double* B_re, 
@@ -1341,8 +1340,7 @@ void make_two_nucleon_2pt(double* C_re,
    free(H_BB_r3_re);
    free(H_BB_r3_im);
    total_time += clock();
-   printf("Time in make_local_block: %f\n", ((float) local_block_time) / CLOCKS_PER_SEC);
-   printf("Time in make_block: %f\n", ((float) nonlocal_block_time) / CLOCKS_PER_SEC);
+   printf("Time in make_block: %f\n", ((float) block_time) / CLOCKS_PER_SEC);
    printf("Time in make_dibaryon_correlator: %f\n", ((float) correlator_time) / CLOCKS_PER_SEC);
    printf("Total time: %f\n", ((float) total_time) / CLOCKS_PER_SEC);
 }
