@@ -19,3 +19,9 @@ configure.cmake
 3rdParty/*
 __pycache__
 .ipynb_checkpoints
+
+*.bak
+*.bak.*
+*.txt
+*.o
+*.o.h
