@@ -71,6 +71,7 @@ int Blocal_index(int c1, int s1, int c2, int s2, int c3, int s3, int m, int Nc_f
 }
 
 // timers
+clock_t local_block_time;
 clock_t first_block_time;
 clock_t second_block_time;
 clock_t third_block_time;
@@ -96,6 +97,7 @@ void make_local_block(double* Blocal_re,
     const int Nw_f,
     const int Nq_f,
     const int Nsrc_f) {
+   local_block_time -= clock();
    /* loop indices */
    int iCprime, iSprime, jCprime, jSprime, kCprime, kSprime, iC, iS, jC, jS, kC, kS, y, wnum, m;
    /* subexpressions */
@@ -138,6 +140,7 @@ void make_local_block(double* Blocal_re,
          }
       }
    }
+   local_block_time += clock();
 }
 
 void make_local_snk_block(double* Blocal_re, 
@@ -207,8 +210,6 @@ void make_local_snk_block(double* Blocal_re,
 
 void make_second_block(double* Bsecond_re, 
     double* Bsecond_im, 
-    double* Blocal_re, 
-    double* Blocal_im, 
     const double* prop_re,
     const double* prop_im, 
     const int* color_weights, 
@@ -237,24 +238,18 @@ void make_second_block(double* Bsecond_re,
    double prop_prod_1_re [Ns * Nc], prop_prod_1_im [Ns * Nc], 
           prop_prod_2_re [Ns * Nc], prop_prod_2_im [Ns * Nc];
    /* initialize */
-   zero_block(Blocal_re);
-   zero_block(Blocal_im);
    zero_block(Bsecond_re);
    zero_block(Bsecond_im);
    double packed_prop_1_re [Vsrc_f * Nc * Ns * Nc * Ns], packed_prop_1_im [Vsrc_f * Nc * Ns * Nc * Ns];
-   double packed_second_prop_1_re [Vsrc_f * Nc * Ns * Nc * Ns], packed_second_prop_1_im [Vsrc_f * Nc * Ns * Nc * Ns];
    for (y = 0; y < Vsrc_f; y ++)
       for (jC = 0; jC < Nc; jC ++)
          for (jS = 0; jS < Ns; jS ++)
             for (jCprime = 0; jCprime < Nc; jCprime ++)
                for (jSprime = 0; jSprime < Ns; jSprime ++) {
                   int new_index = (((y * Nc + jC) * Ns + jS) * Nc + jCprime) * Ns + jSprime;
-                  int old_index = prop_index(1,t,jC,jS,jCprime,jSprime,y,x1 ,Nc,Ns,Vsrc_f,Vsnk_f,Nt_f);
+                  int old_index = prop_index(1,t,jC,jS,jCprime,jSprime,y,x2 ,Nc,Ns,Vsrc_f,Vsnk_f,Nt_f);
                   packed_prop_1_re[new_index] = prop_re[old_index];
                   packed_prop_1_im[new_index] = prop_im[old_index];
-                  old_index = prop_index(1,t,jC,jS,jCprime,jSprime,y,x2 ,Nc,Ns,Vsrc_f,Vsnk_f,Nt_f);
-                  packed_second_prop_1_re[new_index] = prop_re[old_index];
-                  packed_second_prop_1_im[new_index] = prop_im[old_index];
                }
    /* build local (no quark exchange) block */
    for (iCprime=0; iCprime<Nc; iCprime++) {
@@ -285,10 +280,6 @@ void make_second_block(double* Bsecond_re,
                            double prop_1_im = packed_prop_1_im[packed_index];
                            prop_prod_1_re[jCprime * Ns + jSprime] += prop_1_re * prop_prod_02_re - prop_1_im * prop_prod_02_im;
                            prop_prod_1_im[jCprime * Ns + jSprime] += prop_1_im * prop_prod_02_re + prop_1_re * prop_prod_02_im;
-                           double second_prop_1_re = packed_second_prop_1_re[packed_index];
-                           double second_prop_1_im = packed_second_prop_1_im[packed_index];
-                           prop_prod_2_re[jCprime * Ns + jSprime] += second_prop_1_re * prop_prod_02_re - second_prop_1_im * prop_prod_02_im;
-                           prop_prod_2_im[jCprime * Ns + jSprime] += second_prop_1_im * prop_prod_02_re + second_prop_1_re * prop_prod_02_im;
                         }
                      }
                   }
@@ -296,8 +287,6 @@ void make_second_block(double* Bsecond_re,
                      for (jSprime=0; jSprime<Ns; jSprime++) {
                         double * prop_prod_re, * prop_prod_im;
                         prop_prod_re = prop_prod_1_re; prop_prod_im = prop_prod_1_im;
-                        block_ft(Blocal_re, Blocal_im);
-                        prop_prod_re = prop_prod_2_re; prop_prod_im = prop_prod_2_im;
                         block_ft(Bsecond_re, Bsecond_im);
                      }
                   }
@@ -1167,53 +1156,88 @@ void make_two_nucleon_2pt(double* C_re,
    printf("made snk weights \n");
    if (Nsrc_f > 0 && Nsnk_f > 0) {
          /* BB_BB */
-      double* B1_Blocal_r1_re = (double *) malloc(Nc_f * Ns_f * Nc_f * Ns_f * Nc_f * Ns_f * Nsrc_f * sizeof (double));
-      double* B1_Blocal_r1_im = (double *) malloc(Nc_f * Ns_f * Nc_f * Ns_f * Nc_f * Ns_f * Nsrc_f * sizeof (double));
-      double* B1_Blocal_r2_re = (double *) malloc(Nc_f * Ns_f * Nc_f * Ns_f * Nc_f * Ns_f * Nsrc_f * sizeof (double));
-      double* B1_Blocal_r2_im = (double *) malloc(Nc_f * Ns_f * Nc_f * Ns_f * Nc_f * Ns_f * Nsrc_f * sizeof (double));
-      double* B2_Blocal_r1_re = (double *) malloc(Nc_f * Ns_f * Nc_f * Ns_f * Nc_f * Ns_f * Nsrc_f * sizeof (double));
-      double* B2_Blocal_r1_im = (double *) malloc(Nc_f * Ns_f * Nc_f * Ns_f * Nc_f * Ns_f * Nsrc_f * sizeof (double));
-      double* B2_Blocal_r2_re = (double *) malloc(Nc_f * Ns_f * Nc_f * Ns_f * Nc_f * Ns_f * Nsrc_f * sizeof (double));
-      double* B2_Blocal_r2_im = (double *) malloc(Nc_f * Ns_f * Nc_f * Ns_f * Nc_f * Ns_f * Nsrc_f * sizeof (double));
-      double* B1_Bfirst_r1_re = (double *) malloc(Nc_f * Ns_f * Nc_f * Ns_f * Nc_f * Ns_f * Nsrc_f * sizeof (double));
-      double* B1_Bfirst_r1_im = (double *) malloc(Nc_f * Ns_f * Nc_f * Ns_f * Nc_f * Ns_f * Nsrc_f * sizeof (double));
-      double* B1_Bfirst_r2_re = (double *) malloc(Nc_f * Ns_f * Nc_f * Ns_f * Nc_f * Ns_f * Nsrc_f * sizeof (double));
-      double* B1_Bfirst_r2_im = (double *) malloc(Nc_f * Ns_f * Nc_f * Ns_f * Nc_f * Ns_f * Nsrc_f * sizeof (double));
-      double* B2_Bfirst_r1_re = (double *) malloc(Nc_f * Ns_f * Nc_f * Ns_f * Nc_f * Ns_f * Nsrc_f * sizeof (double));
-      double* B2_Bfirst_r1_im = (double *) malloc(Nc_f * Ns_f * Nc_f * Ns_f * Nc_f * Ns_f * Nsrc_f * sizeof (double));
-      double* B2_Bfirst_r2_re = (double *) malloc(Nc_f * Ns_f * Nc_f * Ns_f * Nc_f * Ns_f * Nsrc_f * sizeof (double));
-      double* B2_Bfirst_r2_im = (double *) malloc(Nc_f * Ns_f * Nc_f * Ns_f * Nc_f * Ns_f * Nsrc_f * sizeof (double));
-      double* B1_Bsecond_r1_re = (double *) malloc(Nc_f * Ns_f * Nc_f * Ns_f * Nc_f * Ns_f * Nsrc_f * sizeof (double));
-      double* B1_Bsecond_r1_im = (double *) malloc(Nc_f * Ns_f * Nc_f * Ns_f * Nc_f * Ns_f * Nsrc_f * sizeof (double));
-      double* B1_Bsecond_r2_re = (double *) malloc(Nc_f * Ns_f * Nc_f * Ns_f * Nc_f * Ns_f * Nsrc_f * sizeof (double));
-      double* B1_Bsecond_r2_im = (double *) malloc(Nc_f * Ns_f * Nc_f * Ns_f * Nc_f * Ns_f * Nsrc_f * sizeof (double));
-      double* B2_Bsecond_r1_re = (double *) malloc(Nc_f * Ns_f * Nc_f * Ns_f * Nc_f * Ns_f * Nsrc_f * sizeof (double));
-      double* B2_Bsecond_r1_im = (double *) malloc(Nc_f * Ns_f * Nc_f * Ns_f * Nc_f * Ns_f * Nsrc_f * sizeof (double));
-      double* B2_Bsecond_r2_re = (double *) malloc(Nc_f * Ns_f * Nc_f * Ns_f * Nc_f * Ns_f * Nsrc_f * sizeof (double));
-      double* B2_Bsecond_r2_im = (double *) malloc(Nc_f * Ns_f * Nc_f * Ns_f * Nc_f * Ns_f * Nsrc_f * sizeof (double));
-      double* B1_Bthird_r1_re = (double *) malloc(Nc_f * Ns_f * Nc_f * Ns_f * Nc_f * Ns_f * Nsrc_f * sizeof (double));
-      double* B1_Bthird_r1_im = (double *) malloc(Nc_f * Ns_f * Nc_f * Ns_f * Nc_f * Ns_f * Nsrc_f * sizeof (double));
-      double* B1_Bthird_r2_re = (double *) malloc(Nc_f * Ns_f * Nc_f * Ns_f * Nc_f * Ns_f * Nsrc_f * sizeof (double));
-      double* B1_Bthird_r2_im = (double *) malloc(Nc_f * Ns_f * Nc_f * Ns_f * Nc_f * Ns_f * Nsrc_f * sizeof (double));
-      double* B2_Bthird_r1_re = (double *) malloc(Nc_f * Ns_f * Nc_f * Ns_f * Nc_f * Ns_f * Nsrc_f * sizeof (double));
-      double* B2_Bthird_r1_im = (double *) malloc(Nc_f * Ns_f * Nc_f * Ns_f * Nc_f * Ns_f * Nsrc_f * sizeof (double));
-      double* B2_Bthird_r2_re = (double *) malloc(Nc_f * Ns_f * Nc_f * Ns_f * Nc_f * Ns_f * Nsrc_f * sizeof (double));
-      double* B2_Bthird_r2_im = (double *) malloc(Nc_f * Ns_f * Nc_f * Ns_f * Nc_f * Ns_f * Nsrc_f * sizeof (double));
+      int block_size = Nc_f * Ns_f * Nc_f * Ns_f * Nc_f * Ns_f * Nsrc_f;
+      double* B1_Blocal_r1_re_all = (double *) malloc(Vsnk_f * block_size * sizeof (double));
+      double* B1_Blocal_r1_im_all = (double *) malloc(Vsnk_f * block_size * sizeof (double));
+      double* B1_Blocal_r2_re_all = (double *) malloc(Vsnk_f * block_size * sizeof (double));
+      double* B1_Blocal_r2_im_all = (double *) malloc(Vsnk_f * block_size * sizeof (double));
+      double* B2_Blocal_r1_re_all = (double *) malloc(Vsnk_f * block_size * sizeof (double));
+      double* B2_Blocal_r1_im_all = (double *) malloc(Vsnk_f * block_size * sizeof (double));
+      double* B2_Blocal_r2_re_all = (double *) malloc(Vsnk_f * block_size * sizeof (double));
+      double* B2_Blocal_r2_im_all = (double *) malloc(Vsnk_f * block_size * sizeof (double));
+      double* B1_Blocal_r1_re;
+      double* B1_Blocal_r1_im;
+      double* B1_Blocal_r2_re;
+      double* B1_Blocal_r2_im;
+      double* B2_Blocal_r1_re;
+      double* B2_Blocal_r1_im;
+      double* B2_Blocal_r2_re;
+      double* B2_Blocal_r2_im;
+
+      double* B1_Bfirst_r1_re  = (double *) malloc(block_size * sizeof (double));
+      double* B1_Bfirst_r1_im  = (double *) malloc(block_size * sizeof (double));
+      double* B1_Bfirst_r2_re  = (double *) malloc(block_size * sizeof (double));
+      double* B1_Bfirst_r2_im  = (double *) malloc(block_size * sizeof (double));
+      double* B2_Bfirst_r1_re  = (double *) malloc(block_size * sizeof (double));
+      double* B2_Bfirst_r1_im  = (double *) malloc(block_size * sizeof (double));
+      double* B2_Bfirst_r2_re  = (double *) malloc(block_size * sizeof (double));
+      double* B2_Bfirst_r2_im  = (double *) malloc(block_size * sizeof (double));
+      double* B1_Bsecond_r1_re = (double *) malloc(block_size * sizeof (double));
+      double* B1_Bsecond_r1_im = (double *) malloc(block_size * sizeof (double));
+      double* B1_Bsecond_r2_re = (double *) malloc(block_size * sizeof (double));
+      double* B1_Bsecond_r2_im = (double *) malloc(block_size * sizeof (double));
+      double* B2_Bsecond_r1_re = (double *) malloc(block_size * sizeof (double));
+      double* B2_Bsecond_r1_im = (double *) malloc(block_size * sizeof (double));
+      double* B2_Bsecond_r2_re = (double *) malloc(block_size * sizeof (double));
+      double* B2_Bsecond_r2_im = (double *) malloc(block_size * sizeof (double));
+      double* B1_Bthird_r1_re  = (double *) malloc(block_size * sizeof (double));
+      double* B1_Bthird_r1_im  = (double *) malloc(block_size * sizeof (double));
+      double* B1_Bthird_r2_re  = (double *) malloc(block_size * sizeof (double));
+      double* B1_Bthird_r2_im  = (double *) malloc(block_size * sizeof (double));
+      double* B2_Bthird_r1_re  = (double *) malloc(block_size * sizeof (double));
+      double* B2_Bthird_r1_im  = (double *) malloc(block_size * sizeof (double));
+      double* B2_Bthird_r2_re  = (double *) malloc(block_size * sizeof (double));
+      double* B2_Bthird_r2_im  = (double *) malloc(block_size * sizeof (double));
       for (t=0; t<Nt_f; t++) {
+         // precompute local blocks
+         // NB: These are equal here but are not equal if src_weights is different for B1 and B2
+         for (x =0; x<Vsnk_f; x++) {
+            B1_Blocal_r1_re = B1_Blocal_r1_re_all + x * block_size;
+            B1_Blocal_r1_im = B1_Blocal_r1_im_all + x * block_size;
+            B1_Blocal_r2_re = B1_Blocal_r2_re_all + x * block_size;
+            B1_Blocal_r2_im = B1_Blocal_r2_im_all + x * block_size;
+            B2_Blocal_r1_re = B2_Blocal_r1_re_all + x * block_size;
+            B2_Blocal_r1_im = B2_Blocal_r1_im_all + x * block_size;
+            B2_Blocal_r2_re = B2_Blocal_r2_re_all + x * block_size;
+            B2_Blocal_r2_im = B2_Blocal_r2_im_all + x * block_size;
+            make_local_block(B1_Blocal_r1_re, B1_Blocal_r1_im, B1_prop_re, B1_prop_im, src_color_weights_r1, src_spin_weights_r1, src_weights_r1, src_psi_B1_re, src_psi_B1_im, t, x, Nc_f,Ns_f,Vsrc_f,Vsnk_f,Nt_f,Nw_f,Nq_f,Nsrc_f);
+            make_local_block(B1_Blocal_r2_re, B1_Blocal_r2_im, B1_prop_re, B1_prop_im, src_color_weights_r2, src_spin_weights_r2, src_weights_r2, src_psi_B1_re, src_psi_B1_im, t, x, Nc_f,Ns_f,Vsrc_f,Vsnk_f,Nt_f,Nw_f,Nq_f,Nsrc_f);
+            make_local_block(B2_Blocal_r1_re, B2_Blocal_r1_im, B2_prop_re, B2_prop_im, src_color_weights_r1, src_spin_weights_r1, src_weights_r1, src_psi_B2_re, src_psi_B2_im, t, x, Nc_f,Ns_f,Vsrc_f,Vsnk_f,Nt_f,Nw_f,Nq_f,Nsrc_f);
+            make_local_block(B2_Blocal_r2_re, B2_Blocal_r2_im, B2_prop_re, B2_prop_im, src_color_weights_r2, src_spin_weights_r2, src_weights_r2, src_psi_B2_re, src_psi_B2_im, t, x, Nc_f,Ns_f,Vsrc_f,Vsnk_f,Nt_f,Nw_f,Nq_f,Nsrc_f);
+         }
          for (x1 =0; x1<Vsnk_f; x1++) {
             for (x2 =0; x2<Vsnk_f; x2++) {
+               // retrieve local blocks
+               B1_Blocal_r1_re = B1_Blocal_r1_re_all + x1 * block_size;
+               B1_Blocal_r1_im = B1_Blocal_r1_im_all + x1 * block_size;
+               B1_Blocal_r2_re = B1_Blocal_r2_re_all + x1 * block_size;
+               B1_Blocal_r2_im = B1_Blocal_r2_im_all + x1 * block_size;
+               B2_Blocal_r1_re = B2_Blocal_r1_re_all + x2 * block_size;
+               B2_Blocal_r1_im = B2_Blocal_r1_im_all + x2 * block_size;
+               B2_Blocal_r2_re = B2_Blocal_r2_re_all + x2 * block_size;
+               B2_Blocal_r2_im = B2_Blocal_r2_im_all + x2 * block_size;
                // create blocks
                make_first_block(B1_Bfirst_r1_re, B1_Bfirst_r1_im, B1_prop_re, B1_prop_im, src_color_weights_r1, src_spin_weights_r1, src_weights_r1, src_psi_B1_re, src_psi_B1_im, t, x1, x2, Nc_f,Ns_f,Vsrc_f,Vsnk_f,Nt_f,Nw_f,Nq_f,Nsrc_f);
                make_first_block(B1_Bfirst_r2_re, B1_Bfirst_r2_im, B1_prop_re, B1_prop_im, src_color_weights_r2, src_spin_weights_r2, src_weights_r2, src_psi_B1_re, src_psi_B1_im, t, x1, x2, Nc_f,Ns_f,Vsrc_f,Vsnk_f,Nt_f,Nw_f,Nq_f,Nsrc_f);
-               make_second_block(B1_Bsecond_r1_re, B1_Bsecond_r1_im, B1_Blocal_r1_re, B1_Blocal_r1_im, B1_prop_re, B1_prop_im, src_color_weights_r1, src_spin_weights_r1, src_weights_r1, src_psi_B1_re, src_psi_B1_im, t, x1, x2, Nc_f,Ns_f,Vsrc_f,Vsnk_f,Nt_f,Nw_f,Nq_f,Nsrc_f);
-               make_second_block(B1_Bsecond_r2_re, B1_Bsecond_r2_im, B1_Blocal_r2_re, B1_Blocal_r2_im, B1_prop_re, B1_prop_im, src_color_weights_r2, src_spin_weights_r2, src_weights_r2, src_psi_B1_re, src_psi_B1_im, t, x1, x2, Nc_f,Ns_f,Vsrc_f,Vsnk_f,Nt_f,Nw_f,Nq_f,Nsrc_f);
+               make_second_block(B1_Bsecond_r1_re, B1_Bsecond_r1_im, B1_prop_re, B1_prop_im, src_color_weights_r1, src_spin_weights_r1, src_weights_r1, src_psi_B1_re, src_psi_B1_im, t, x1, x2, Nc_f,Ns_f,Vsrc_f,Vsnk_f,Nt_f,Nw_f,Nq_f,Nsrc_f);
+               make_second_block(B1_Bsecond_r2_re, B1_Bsecond_r2_im, B1_prop_re, B1_prop_im, src_color_weights_r2, src_spin_weights_r2, src_weights_r2, src_psi_B1_re, src_psi_B1_im, t, x1, x2, Nc_f,Ns_f,Vsrc_f,Vsnk_f,Nt_f,Nw_f,Nq_f,Nsrc_f);
                make_third_block(B1_Bthird_r1_re, B1_Bthird_r1_im, B1_prop_re, B1_prop_im, src_color_weights_r1, src_spin_weights_r1, src_weights_r1, src_psi_B1_re, src_psi_B1_im, t, x1, x2, Nc_f,Ns_f,Vsrc_f,Vsnk_f,Nt_f,Nw_f,Nq_f,Nsrc_f);
                make_third_block(B1_Bthird_r2_re, B1_Bthird_r2_im, B1_prop_re, B1_prop_im, src_color_weights_r2, src_spin_weights_r2, src_weights_r2, src_psi_B1_re, src_psi_B1_im, t, x1, x2, Nc_f,Ns_f,Vsrc_f,Vsnk_f,Nt_f,Nw_f,Nq_f,Nsrc_f);
 
                make_first_block(B2_Bfirst_r1_re, B2_Bfirst_r1_im, B2_prop_re, B2_prop_im, src_color_weights_r1, src_spin_weights_r1, src_weights_r1, src_psi_B2_re, src_psi_B2_im, t, x2, x1, Nc_f,Ns_f,Vsrc_f,Vsnk_f,Nt_f,Nw_f,Nq_f,Nsrc_f);
                make_first_block(B2_Bfirst_r2_re, B2_Bfirst_r2_im, B2_prop_re, B2_prop_im, src_color_weights_r2, src_spin_weights_r2, src_weights_r2, src_psi_B2_re, src_psi_B2_im, t, x2, x1, Nc_f,Ns_f,Vsrc_f,Vsnk_f,Nt_f,Nw_f,Nq_f,Nsrc_f);
-               make_second_block(B2_Bsecond_r1_re, B2_Bsecond_r1_im, B2_Blocal_r1_re, B2_Blocal_r1_im, B2_prop_re, B2_prop_im, src_color_weights_r1, src_spin_weights_r1, src_weights_r1, src_psi_B2_re, src_psi_B2_im, t, x2, x1, Nc_f,Ns_f,Vsrc_f,Vsnk_f,Nt_f,Nw_f,Nq_f,Nsrc_f);
-               make_second_block(B2_Bsecond_r2_re, B2_Bsecond_r2_im, B2_Blocal_r2_re, B2_Blocal_r2_im, B2_prop_re, B2_prop_im, src_color_weights_r2, src_spin_weights_r2, src_weights_r2, src_psi_B2_re, src_psi_B2_im, t, x2, x1, Nc_f,Ns_f,Vsrc_f,Vsnk_f,Nt_f,Nw_f,Nq_f,Nsrc_f);
+               make_second_block(B2_Bsecond_r1_re, B2_Bsecond_r1_im, B2_prop_re, B2_prop_im, src_color_weights_r1, src_spin_weights_r1, src_weights_r1, src_psi_B2_re, src_psi_B2_im, t, x2, x1, Nc_f,Ns_f,Vsrc_f,Vsnk_f,Nt_f,Nw_f,Nq_f,Nsrc_f);
+               make_second_block(B2_Bsecond_r2_re, B2_Bsecond_r2_im, B2_prop_re, B2_prop_im, src_color_weights_r2, src_spin_weights_r2, src_weights_r2, src_psi_B2_re, src_psi_B2_im, t, x2, x1, Nc_f,Ns_f,Vsrc_f,Vsnk_f,Nt_f,Nw_f,Nq_f,Nsrc_f);
                make_third_block(B2_Bthird_r1_re, B2_Bthird_r1_im, B2_prop_re, B2_prop_im, src_color_weights_r1, src_spin_weights_r1, src_weights_r1, src_psi_B2_re, src_psi_B2_im, t, x2, x1, Nc_f,Ns_f,Vsrc_f,Vsnk_f,Nt_f,Nw_f,Nq_f,Nsrc_f);
                make_third_block(B2_Bthird_r2_re, B2_Bthird_r2_im, B2_prop_re, B2_prop_im, src_color_weights_r2, src_spin_weights_r2, src_weights_r2, src_psi_B2_re, src_psi_B2_im, t, x2, x1, Nc_f,Ns_f,Vsrc_f,Vsnk_f,Nt_f,Nw_f,Nq_f,Nsrc_f);
                /* compute two nucleon correlators from blocks */
@@ -1279,14 +1303,15 @@ void make_two_nucleon_2pt(double* C_re,
             }
          }
       }
-      free(B1_Blocal_r1_re);
-      free(B1_Blocal_r1_im);
-      free(B1_Blocal_r2_re);
-      free(B1_Blocal_r2_im);
-      free(B2_Blocal_r1_re);
-      free(B2_Blocal_r1_im);
-      free(B2_Blocal_r2_re);
-      free(B2_Blocal_r2_im);
+      free(B1_Blocal_r1_re_all);
+      free(B1_Blocal_r1_im_all);
+      free(B1_Blocal_r2_re_all);
+      free(B1_Blocal_r2_im_all);
+      free(B2_Blocal_r1_re_all);
+      free(B2_Blocal_r1_im_all);
+      free(B2_Blocal_r2_re_all);
+      free(B2_Blocal_r2_im_all);
+
       free(B1_Bfirst_r1_re);
       free(B1_Bfirst_r1_im);
       free(B1_Bfirst_r2_re);
@@ -1462,6 +1487,7 @@ void make_two_nucleon_2pt(double* C_re,
    free(H_BB_r3_re);
    free(H_BB_r3_im);
    total_time += clock();
+   printf("Time in make_local_block: %f\n", ((float) local_block_time) / CLOCKS_PER_SEC);
    printf("Time in make_first_block: %f\n", ((float) first_block_time) / CLOCKS_PER_SEC);
    printf("Time in make_second_block: %f\n", ((float) second_block_time) / CLOCKS_PER_SEC);
    printf("Time in make_third_block: %f\n", ((float) third_block_time) / CLOCKS_PER_SEC);
