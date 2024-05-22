@@ -72,9 +72,7 @@ int Blocal_index(int c1, int s1, int c2, int s2, int c3, int s3, int m, int Nc_f
 
 // timers
 clock_t local_block_time;
-clock_t first_block_time;
-clock_t second_block_time;
-clock_t third_block_time;
+clock_t nonlocal_block_time;
 clock_t correlator_time;
 clock_t total_time;
 
@@ -208,8 +206,8 @@ void make_local_snk_block(double* Blocal_re,
    }
 }
 
-void make_second_block(double* Bsecond_re, 
-    double* Bsecond_im, 
+void make_block(double* B_re, 
+    double* B_im, 
     const double* prop_re,
     const double* prop_im, 
     const int* color_weights, 
@@ -218,8 +216,9 @@ void make_second_block(double* Bsecond_re,
     const double* psi_re, 
     const double* psi_im,
     const int t,
-    const int x1,
-    const int x2,
+    const int x0, // index of prop 0
+    const int x1, // index of prop 1
+    const int x2, // index of prop 2
     const int Nc_f,
     const int Ns_f,
     const int Vsrc_f,
@@ -228,109 +227,17 @@ void make_second_block(double* Bsecond_re,
     const int Nw_f,
     const int Nq_f,
     const int Nsrc_f) {
-   second_block_time -= clock();
+   nonlocal_block_time -= clock();
    assert(Nc == Nc_f);
    assert(Ns == Ns_f);
-   /* loop indices */
-   int iCprime, iSprime, jCprime, jSprime, kCprime, kSprime, iC, iS, jC, jS, kC, kS, y, wnum, m;
-   /* subexpressions */
-   std::complex <double> prop_prod_02;
-   double prop_prod_1_re [Ns * Nc], prop_prod_1_im [Ns * Nc], 
-          prop_prod_2_re [Ns * Nc], prop_prod_2_im [Ns * Nc];
-   /* initialize */
-   zero_block(Bsecond_re);
-   zero_block(Bsecond_im);
-   double packed_prop_1_re [Vsrc_f * Nc * Ns * Nc * Ns], packed_prop_1_im [Vsrc_f * Nc * Ns * Nc * Ns];
-   for (y = 0; y < Vsrc_f; y ++)
-      for (jC = 0; jC < Nc; jC ++)
-         for (jS = 0; jS < Ns; jS ++)
-            for (jCprime = 0; jCprime < Nc; jCprime ++)
-               for (jSprime = 0; jSprime < Ns; jSprime ++) {
-                  int new_index = (((y * Nc + jC) * Ns + jS) * Nc + jCprime) * Ns + jSprime;
-                  int old_index = prop_index(1,t,jC,jS,jCprime,jSprime,y,x2 ,Nc,Ns,Vsrc_f,Vsnk_f,Nt_f);
-                  packed_prop_1_re[new_index] = prop_re[old_index];
-                  packed_prop_1_im[new_index] = prop_im[old_index];
-               }
-   /* build local (no quark exchange) block */
-   for (iCprime=0; iCprime<Nc; iCprime++) {
-      for (iSprime=0; iSprime<Ns; iSprime++) {
-         for (kCprime=0; kCprime<Nc; kCprime++) {
-            for (kSprime=0; kSprime<Ns; kSprime++) {
-               for (y=0; y<Vsrc_f; y++) {
-                  for (int index = 0; index < Nc * Ns; index ++) {
-                     prop_prod_1_re[index] = prop_prod_1_im[index] = 0;
-                     prop_prod_2_re[index] = prop_prod_2_im[index] = 0;
-                  }
-                  for (wnum=0; wnum<Nw_f; wnum++) {
-                     iC = color_weights[index_2d(wnum,0, Nq_f)];
-                     iS = spin_weights[index_2d(wnum,0, Nq_f)];
-                     jC = color_weights[index_2d(wnum,1, Nq_f)];
-                     jS = spin_weights[index_2d(wnum,1, Nq_f)];
-                     kC = color_weights[index_2d(wnum,2, Nq_f)];
-                     kS = spin_weights[index_2d(wnum,2, Nq_f)];
-                     std::complex<double> prop_0(prop_re[prop_index(0,t,iC,iS,iCprime,iSprime,y,x1 ,Nc,Ns,Vsrc_f,Vsnk_f,Nt_f)], prop_im[prop_index(0,t,iC,iS,iCprime,iSprime,y,x1 ,Nc,Ns,Vsrc_f,Vsnk_f,Nt_f)]);
-                     std::complex<double> prop_2(prop_re[prop_index(2,t,kC,kS,kCprime,kSprime,y,x1 ,Nc,Ns,Vsrc_f,Vsnk_f,Nt_f)], prop_im[prop_index(2,t,kC,kS,kCprime,kSprime,y,x1 ,Nc,Ns,Vsrc_f,Vsnk_f,Nt_f)]);
-                     prop_prod_02 = weights[wnum] * ( prop_0 * prop_2 );
-                     double prop_prod_02_re = real(prop_prod_02);
-                     double prop_prod_02_im = imag(prop_prod_02);
-                     for (jCprime=0; jCprime<Nc; jCprime++) {
-                        for (jSprime=0; jSprime<Ns; jSprime++) {
-                           int packed_index = (((y * Nc + jC) * Ns + jS) * Nc + jCprime) * Ns + jSprime;
-                           double prop_1_re = packed_prop_1_re[packed_index];
-                           double prop_1_im = packed_prop_1_im[packed_index];
-                           prop_prod_1_re[jCprime * Ns + jSprime] += prop_1_re * prop_prod_02_re - prop_1_im * prop_prod_02_im;
-                           prop_prod_1_im[jCprime * Ns + jSprime] += prop_1_im * prop_prod_02_re + prop_1_re * prop_prod_02_im;
-                        }
-                     }
-                  }
-                  for (jCprime=0; jCprime<Nc; jCprime++) {
-                     for (jSprime=0; jSprime<Ns; jSprime++) {
-                        double * prop_prod_re, * prop_prod_im;
-                        prop_prod_re = prop_prod_1_re; prop_prod_im = prop_prod_1_im;
-                        block_ft(Bsecond_re, Bsecond_im);
-                     }
-                  }
-               }
-            }
-         }
-      }
-   }
-   second_block_time += clock();
-}
-
-
-void make_first_block(double* Bfirst_re, 
-    double* Bfirst_im, 
-    const double* prop_re,
-    const double* prop_im, 
-    const int* color_weights, 
-    const int* spin_weights, 
-    const double* weights, 
-    const double* psi_re, 
-    const double* psi_im,
-    const int t,
-    const int x1,
-    const int x2,
-    const int Nc_f,
-    const int Ns_f,
-    const int Vsrc_f,
-    const int Vsnk_f,
-    const int Nt_f,
-    const int Nw_f,
-    const int Nq_f,
-    const int Nsrc_f) {
-   first_block_time -= clock();
-   assert(Nc == Nc_f);
-   assert(Ns == Ns_f);
-   assert(Nsrc == Nsrc_f);
    /* loop indices */
    int iCprime, iSprime, jCprime, jSprime, kCprime, kSprime, iC, iS, jC, jS, kC, kS, y, wnum, m;
    /* subexpressions */
    std::complex <double> prop_prod_02;
    double prop_prod_re[Ns * Nc], prop_prod_im[Ns * Nc];
    /* initialize */
-   zero_block(Bfirst_re);
-   zero_block(Bfirst_im);
+   zero_block(B_re);
+   zero_block(B_im);
    double packed_prop_0_re [Vsrc_f * Nc * Ns * Nc * Ns], packed_prop_0_im [Vsrc_f * Nc * Ns * Nc * Ns];
    double packed_prop_1_re [Vsrc_f * Nc * Ns * Nc * Ns], packed_prop_1_im [Vsrc_f * Nc * Ns * Nc * Ns];
    double packed_prop_2_re [Vsrc_f * Nc * Ns * Nc * Ns], packed_prop_2_im [Vsrc_f * Nc * Ns * Nc * Ns];
@@ -340,13 +247,13 @@ void make_first_block(double* Bfirst_re,
             for (iCprime = 0; iCprime < Nc; iCprime ++)
                for (iSprime = 0; iSprime < Ns; iSprime ++) {
                   int new_index = (((y * Nc + iC) * Ns + iS) * Nc + iCprime) * Ns + iSprime;
-                  int old_index = prop_index(0,t,iC,iS,iCprime,iSprime,y,x2 ,Nc,Ns,Vsrc_f,Vsnk_f,Nt_f);
+                  int old_index = prop_index(0,t,iC,iS,iCprime,iSprime,y,x0 ,Nc,Ns,Vsrc_f,Vsnk_f,Nt_f);
                   packed_prop_0_re[new_index] = prop_re[old_index];
                   packed_prop_0_im[new_index] = prop_im[old_index];
                   old_index = prop_index(1,t,iC,iS,iCprime,iSprime,y,x1 ,Nc,Ns,Vsrc_f,Vsnk_f,Nt_f);
                   packed_prop_1_re[new_index] = prop_re[old_index];
                   packed_prop_1_im[new_index] = prop_im[old_index];
-                  old_index = prop_index(2,t,iC,iS,iCprime,iSprime,y,x1 ,Nc,Ns,Vsrc_f,Vsnk_f,Nt_f);
+                  old_index = prop_index(2,t,iC,iS,iCprime,iSprime,y,x2 ,Nc,Ns,Vsrc_f,Vsnk_f,Nt_f);
                   packed_prop_2_re[new_index] = prop_re[old_index];
                   packed_prop_2_im[new_index] = prop_im[old_index];
                }
@@ -385,7 +292,7 @@ void make_first_block(double* Bfirst_re,
                   }
                   for (jCprime=0; jCprime<Nc; jCprime++) {
                      for (jSprime=0; jSprime<Ns; jSprime++) {
-                        block_ft(Bfirst_re, Bfirst_im);
+                        block_ft(B_re, B_im);
                      }
                   }
                }
@@ -393,11 +300,11 @@ void make_first_block(double* Bfirst_re,
          }
       }
    }
-   first_block_time += clock();
+   nonlocal_block_time += clock();
 }
 
-void make_third_block(double* Bthird_re, 
-    double* Bthird_im, 
+void make_first_block(double* B_re, 
+    double* B_im, 
     const double* prop_re,
     const double* prop_im, 
     const int* color_weights, 
@@ -416,71 +323,59 @@ void make_third_block(double* Bthird_re,
     const int Nw_f,
     const int Nq_f,
     const int Nsrc_f) {
-   third_block_time -= clock();
-   assert(Nc == Nc_f);
-   assert(Ns == Ns_f);
-   /* loop indices */
-   int iCprime, iSprime, jCprime, jSprime, kCprime, kSprime, iC, iS, jC, jS, kC, kS, y, wnum, m;
-   /* subexpressions */
-   std::complex <double> prop_prod_02;
-   double prop_prod_re[Ns * Nc], prop_prod_im[Ns * Nc];
-   /* initialize */
-   zero_block(Bthird_re);
-   zero_block(Bthird_im);
-   double packed_prop_1_re [Vsrc_f * Nc * Ns * Nc * Ns], packed_prop_1_im [Vsrc_f * Nc * Ns * Nc * Ns];
-   for (y = 0; y < Vsrc_f; y ++)
-      for (jC = 0; jC < Nc; jC ++)
-         for (jS = 0; jS < Ns; jS ++)
-            for (jCprime = 0; jCprime < Nc; jCprime ++)
-               for (jSprime = 0; jSprime < Ns; jSprime ++) {
-                  int new_index = (((y * Nc + jC) * Ns + jS) * Nc + jCprime) * Ns + jSprime;
-                  int old_index = prop_index(1,t,jC,jS,jCprime,jSprime,y,x1 ,Nc,Ns,Vsrc_f,Vsnk_f,Nt_f);
-                  packed_prop_1_re[new_index] = prop_re[old_index];
-                  packed_prop_1_im[new_index] = prop_im[old_index];
-               }
-   /* build local (no quark exchange) block */
-   for (iCprime=0; iCprime<Nc; iCprime++) {
-      for (iSprime=0; iSprime<Ns; iSprime++) {
-         for (kCprime=0; kCprime<Nc; kCprime++) {
-            for (kSprime=0; kSprime<Ns; kSprime++) {
-               for (y=0; y<Vsrc_f; y++) {
-                  for (int index = 0; index < Nc * Ns; index ++)
-                     prop_prod_re[index] = prop_prod_im[index] = 0;
-                  for (wnum=0; wnum<Nw_f; wnum++) {
-                     iC = color_weights[index_2d(wnum,0, Nq_f)];
-                     iS = spin_weights[index_2d(wnum,0, Nq_f)];
-                     jC = color_weights[index_2d(wnum,1, Nq_f)];
-                     jS = spin_weights[index_2d(wnum,1, Nq_f)];
-                     kC = color_weights[index_2d(wnum,2, Nq_f)];
-                     kS = spin_weights[index_2d(wnum,2, Nq_f)];
-                     std::complex<double> prop_0(prop_re[prop_index(0,t,iC,iS,iCprime,iSprime,y,x1 ,Nc,Ns,Vsrc_f,Vsnk_f,Nt_f)], prop_im[prop_index(0,t,iC,iS,iCprime,iSprime,y,x1 ,Nc,Ns,Vsrc_f,Vsnk_f,Nt_f)]);
-                     std::complex<double> prop_2(prop_re[prop_index(2,t,kC,kS,kCprime,kSprime,y,x2 ,Nc,Ns,Vsrc_f,Vsnk_f,Nt_f)], prop_im[prop_index(2,t,kC,kS,kCprime,kSprime,y,x2 ,Nc,Ns,Vsrc_f,Vsnk_f,Nt_f)]);
-                     prop_prod_02 = weights[wnum] * ( prop_0 * prop_2 );
-                     double prop_prod_02_re = real(prop_prod_02);
-                     double prop_prod_02_im = imag(prop_prod_02);
-                     for (jCprime=0; jCprime<Nc; jCprime++) {
-                        for (jSprime=0; jSprime<Ns; jSprime++) {
-                           int packed_index = (((y * Nc + jC) * Ns + jS) * Nc + jCprime) * Ns + jSprime;
-                           double prop_1_re = packed_prop_1_re[packed_index];
-                           double prop_1_im = packed_prop_1_im[packed_index];
-                           prop_prod_re[jCprime * Ns + jSprime] += prop_1_re * prop_prod_02_re - prop_1_im * prop_prod_02_im;
-                           prop_prod_im[jCprime * Ns + jSprime] += prop_1_im * prop_prod_02_re + prop_1_re * prop_prod_02_im;
-                        }
-                     }
-                  }
-                  for (jCprime=0; jCprime<Nc; jCprime++) {
-                     for (jSprime=0; jSprime<Ns; jSprime++) {
-                        double prop_prod_re_val = prop_prod_re[jCprime * Ns + jSprime];
-                        double prop_prod_im_val = prop_prod_im[jCprime * Ns + jSprime];
-                        block_ft(Bthird_re, Bthird_im);
-                     }
-                  }
-               }
-            }
-         }
-      }
-   }
-   third_block_time += clock();
+   make_block(B_re, B_im, prop_re, prop_im, color_weights, spin_weights,
+              weights, psi_re, psi_im, t, x2, x1, x1,
+              Nc_f, Ns_f, Vsrc_f, Vsnk_f, Nt_f, Nw_f, Nq_f, Nsrc_f);
+}
+
+void make_second_block(double* B_re, 
+    double* B_im, 
+    const double* prop_re,
+    const double* prop_im, 
+    const int* color_weights, 
+    const int* spin_weights, 
+    const double* weights, 
+    const double* psi_re, 
+    const double* psi_im,
+    const int t,
+    const int x1,
+    const int x2,
+    const int Nc_f,
+    const int Ns_f,
+    const int Vsrc_f,
+    const int Vsnk_f,
+    const int Nt_f,
+    const int Nw_f,
+    const int Nq_f,
+    const int Nsrc_f) {
+   make_block(B_re, B_im, prop_re, prop_im, color_weights, spin_weights,
+              weights, psi_re, psi_im, t, x1, x2, x1,
+              Nc_f, Ns_f, Vsrc_f, Vsnk_f, Nt_f, Nw_f, Nq_f, Nsrc_f);
+}
+
+void make_third_block(double* B_re, 
+    double* B_im, 
+    const double* prop_re,
+    const double* prop_im, 
+    const int* color_weights, 
+    const int* spin_weights, 
+    const double* weights, 
+    const double* psi_re, 
+    const double* psi_im,
+    const int t,
+    const int x1,
+    const int x2,
+    const int Nc_f,
+    const int Ns_f,
+    const int Vsrc_f,
+    const int Vsnk_f,
+    const int Nt_f,
+    const int Nw_f,
+    const int Nq_f,
+    const int Nsrc_f) {
+   make_block(B_re, B_im, prop_re, prop_im, color_weights, spin_weights,
+              weights, psi_re, psi_im, t, x1, x1, x2,
+              Nc_f, Ns_f, Vsrc_f, Vsnk_f, Nt_f, Nw_f, Nq_f, Nsrc_f);
 }
 
 void make_dibaryon_correlator(double* C_re,
@@ -1488,9 +1383,7 @@ void make_two_nucleon_2pt(double* C_re,
    free(H_BB_r3_im);
    total_time += clock();
    printf("Time in make_local_block: %f\n", ((float) local_block_time) / CLOCKS_PER_SEC);
-   printf("Time in make_first_block: %f\n", ((float) first_block_time) / CLOCKS_PER_SEC);
-   printf("Time in make_second_block: %f\n", ((float) second_block_time) / CLOCKS_PER_SEC);
-   printf("Time in make_third_block: %f\n", ((float) third_block_time) / CLOCKS_PER_SEC);
+   printf("Time in make_block: %f\n", ((float) nonlocal_block_time) / CLOCKS_PER_SEC);
    printf("Time in make_dibaryon_correlator: %f\n", ((float) correlator_time) / CLOCKS_PER_SEC);
    printf("Total time: %f\n", ((float) total_time) / CLOCKS_PER_SEC);
 }
