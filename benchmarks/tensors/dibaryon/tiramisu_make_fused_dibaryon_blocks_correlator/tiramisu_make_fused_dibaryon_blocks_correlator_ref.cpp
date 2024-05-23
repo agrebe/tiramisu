@@ -172,7 +172,8 @@ void make_block(double* B_re,
     const int Nt_f,
     const int Nw_f,
     const int Nq_f,
-    const int Nsrc_f) {
+    const int Nsrc_f,
+    int packed) { // packed = whether incoming props have already been reordered
    block_time -= clock();
    init_time -= clock();
    assert(Nc == Nc_f);
@@ -190,25 +191,40 @@ void make_block(double* B_re,
    /* initialize */
    zero_block(B_re);
    zero_block(B_im);
-   double packed_prop_0_re [Vsrc_f * Nc * Ns * Nc * Ns], packed_prop_0_im [Vsrc_f * Nc * Ns * Nc * Ns];
-   double packed_prop_1_re [Vsrc_f * Nc * Ns * Nc * Ns], packed_prop_1_im [Vsrc_f * Nc * Ns * Nc * Ns];
-   double packed_prop_2_re [Vsrc_f * Nc * Ns * Nc * Ns], packed_prop_2_im [Vsrc_f * Nc * Ns * Nc * Ns];
-   for (y = 0; y < Vsrc_f; y ++)
-      for (iC = 0; iC < Nc; iC ++)
-         for (iS = 0; iS < Ns; iS ++)
-            for (iCprime = 0; iCprime < Nc; iCprime ++)
-               for (iSprime = 0; iSprime < Ns; iSprime ++) {
-                  int new_index = (((y * Nc + iC) * Ns + iS) * Nc + iCprime) * Ns + iSprime;
-                  int old_index = prop_index(0,t,iC,iS,iCprime,iSprime,y,x0 ,Nc,Ns,Vsrc_f,Vsnk_f,Nt_f);
-                  packed_prop_0_re[new_index] = prop_re[old_index];
-                  packed_prop_0_im[new_index] = prop_im[old_index];
-                  old_index = prop_index(1,t,iC,iS,iCprime,iSprime,y,x1 ,Nc,Ns,Vsrc_f,Vsnk_f,Nt_f);
-                  packed_prop_1_re[new_index] = prop_re[old_index];
-                  packed_prop_1_im[new_index] = prop_im[old_index];
-                  old_index = prop_index(2,t,iC,iS,iCprime,iSprime,y,x2 ,Nc,Ns,Vsrc_f,Vsnk_f,Nt_f);
-                  packed_prop_2_re[new_index] = prop_re[old_index];
-                  packed_prop_2_im[new_index] = prop_im[old_index];
-               }
+   double * packed_prop_0_re, * packed_prop_0_im, 
+          * packed_prop_1_re, * packed_prop_1_im, 
+          * packed_prop_2_re, * packed_prop_2_im;
+   if (packed) {
+      packed_prop_0_re = (double*) prop_re + ((0 * Vsrc_f + x0) * Vsrc_f + y) * Nc * Ns * Nc * Ns;
+      packed_prop_0_im = (double*) prop_im + ((0 * Vsrc_f + x0) * Vsrc_f + y) * Nc * Ns * Nc * Ns;
+      packed_prop_1_re = (double*) prop_re + ((1 * Vsrc_f + x1) * Vsrc_f + y) * Nc * Ns * Nc * Ns;
+      packed_prop_1_im = (double*) prop_im + ((1 * Vsrc_f + x1) * Vsrc_f + y) * Nc * Ns * Nc * Ns;
+      packed_prop_2_re = (double*) prop_re + ((2 * Vsrc_f + x2) * Vsrc_f + y) * Nc * Ns * Nc * Ns;
+      packed_prop_2_im = (double*) prop_im + ((2 * Vsrc_f + x2) * Vsrc_f + y) * Nc * Ns * Nc * Ns;
+   } else {
+      packed_prop_0_re = (double *) malloc(sizeof(double) * Vsrc_f * Nc * Ns * Nc * Ns);
+      packed_prop_0_im = (double *) malloc(sizeof(double) * Vsrc_f * Nc * Ns * Nc * Ns);
+      packed_prop_1_re = (double *) malloc(sizeof(double) * Vsrc_f * Nc * Ns * Nc * Ns);
+      packed_prop_1_im = (double *) malloc(sizeof(double) * Vsrc_f * Nc * Ns * Nc * Ns);
+      packed_prop_2_re = (double *) malloc(sizeof(double) * Vsrc_f * Nc * Ns * Nc * Ns);
+      packed_prop_2_im = (double *) malloc(sizeof(double) * Vsrc_f * Nc * Ns * Nc * Ns);
+      for (y = 0; y < Vsrc_f; y ++)
+         for (iC = 0; iC < Nc; iC ++)
+            for (iS = 0; iS < Ns; iS ++)
+               for (iCprime = 0; iCprime < Nc; iCprime ++)
+                  for (iSprime = 0; iSprime < Ns; iSprime ++) {
+                     int new_index = (((y * Nc + iC) * Ns + iS) * Nc + iCprime) * Ns + iSprime;
+                     int old_index = prop_index(0,t,iC,iS,iCprime,iSprime,y,x0 ,Nc,Ns,Vsrc_f,Vsnk_f,Nt_f);
+                     packed_prop_0_re[new_index] = prop_re[old_index];
+                     packed_prop_0_im[new_index] = prop_im[old_index];
+                     old_index = prop_index(1,t,iC,iS,iCprime,iSprime,y,x1 ,Nc,Ns,Vsrc_f,Vsnk_f,Nt_f);
+                     packed_prop_1_re[new_index] = prop_re[old_index];
+                     packed_prop_1_im[new_index] = prop_im[old_index];
+                     old_index = prop_index(2,t,iC,iS,iCprime,iSprime,y,x2 ,Nc,Ns,Vsrc_f,Vsnk_f,Nt_f);
+                     packed_prop_2_re[new_index] = prop_re[old_index];
+                     packed_prop_2_im[new_index] = prop_im[old_index];
+                  }
+   }
    init_time += clock();
    weights_time -= clock();
    /* build local (no quark exchange) block */
@@ -341,7 +357,7 @@ void make_local_block(double* B_re,
     const int Nsrc_f) {
    make_block(B_re, B_im, prop_re, prop_im, color_weights, spin_weights,
               weights, psi_re, psi_im, t, x, x, x,
-              Nc_f, Ns_f, Vsrc_f, Vsnk_f, Nt_f, Nw_f, Nq_f, Nsrc_f);
+              Nc_f, Ns_f, Vsrc_f, Vsnk_f, Nt_f, Nw_f, Nq_f, Nsrc_f, 0);
 }
 
 void make_first_block(double* B_re, 
@@ -366,7 +382,7 @@ void make_first_block(double* B_re,
     const int Nsrc_f) {
    make_block(B_re, B_im, prop_re, prop_im, color_weights, spin_weights,
               weights, psi_re, psi_im, t, x2, x1, x1,
-              Nc_f, Ns_f, Vsrc_f, Vsnk_f, Nt_f, Nw_f, Nq_f, Nsrc_f);
+              Nc_f, Ns_f, Vsrc_f, Vsnk_f, Nt_f, Nw_f, Nq_f, Nsrc_f, 1);
 }
 
 void make_second_block(double* B_re, 
@@ -391,7 +407,7 @@ void make_second_block(double* B_re,
     const int Nsrc_f) {
    make_block(B_re, B_im, prop_re, prop_im, color_weights, spin_weights,
               weights, psi_re, psi_im, t, x1, x2, x1,
-              Nc_f, Ns_f, Vsrc_f, Vsnk_f, Nt_f, Nw_f, Nq_f, Nsrc_f);
+              Nc_f, Ns_f, Vsrc_f, Vsnk_f, Nt_f, Nw_f, Nq_f, Nsrc_f, 1);
 }
 
 void make_third_block(double* B_re, 
@@ -416,7 +432,7 @@ void make_third_block(double* B_re,
     const int Nsrc_f) {
    make_block(B_re, B_im, prop_re, prop_im, color_weights, spin_weights,
               weights, psi_re, psi_im, t, x1, x1, x2,
-              Nc_f, Ns_f, Vsrc_f, Vsnk_f, Nt_f, Nw_f, Nq_f, Nsrc_f);
+              Nc_f, Ns_f, Vsrc_f, Vsnk_f, Nt_f, Nw_f, Nq_f, Nsrc_f, 1);
 }
 
 void make_dibaryon_correlator(double* C_re,
@@ -904,8 +920,8 @@ void make_two_nucleon_2pt(double* C_re,
     const int Nsrc_fHex,
     const int Nsnk_fHex,
     const int Nperms_f) {
-      total_time -= clock();
-      printf("Running reference code with Vsrc = %d, Nw = %d, Nsrc = %d\n", Vsrc_f, Nw_f, Nsrc_f);
+   total_time -= clock();
+   printf("Running reference code with Vsrc = %d, Nw = %d, Nsrc = %d\n", Vsrc_f, Nw_f, Nsrc_f);
    /* indices */
    double overall_weight = 1.0/2.0;
    int nB1, nB2, nq, n, m, t, x1, x2, x, y;
@@ -1135,6 +1151,25 @@ void make_two_nucleon_2pt(double* C_re,
       double* B2_Bthird_r2_re  = (double *) malloc(block_size * sizeof (double));
       double* B2_Bthird_r2_im  = (double *) malloc(block_size * sizeof (double));
       for (t=0; t<Nt_f; t++) {
+         // pack all the props
+         double * B1_packed_re = (double *) malloc(sizeof(double) * 3 * Vsrc_f * Vsrc_f * Nc * Ns * Nc * Ns);
+         double * B1_packed_im = (double *) malloc(sizeof(double) * 3 * Vsrc_f * Vsrc_f * Nc * Ns * Nc * Ns);
+         double * B2_packed_re = (double *) malloc(sizeof(double) * 3 * Vsrc_f * Vsrc_f * Nc * Ns * Nc * Ns);
+         double * B2_packed_im = (double *) malloc(sizeof(double) * 3 * Vsrc_f * Vsrc_f * Nc * Ns * Nc * Ns);
+         for (int prop_num = 0; prop_num < 3; prop_num ++)
+            for (int x = 0; x < Vsrc_f; x ++)
+               for (int y = 0; y < Vsrc_f; y ++)
+                  for (int iC = 0; iC < Nc; iC ++)
+                     for (int iS = 0; iS < Ns; iS ++)
+                        for (int iCprime = 0; iCprime < Nc; iCprime ++)
+                           for (int iSprime = 0; iSprime < Ns; iSprime ++) {
+                              int new_index = (((((prop_num * Vsrc_f + x) * Vsrc_f + y) * Nc + iC) * Ns + iS) * Nc + iCprime) * Ns + iSprime;
+                              int old_index = prop_index(prop_num,t,iC,iS,iCprime,iSprime,y,x ,Nc,Ns,Vsrc_f,Vsnk_f,Nt_f);
+                              B1_packed_re[new_index] = B1_prop_re[old_index];
+                              B1_packed_im[new_index] = B1_prop_im[old_index];
+                              B2_packed_re[new_index] = B2_prop_re[old_index];
+                              B2_packed_im[new_index] = B2_prop_im[old_index];
+                           }
          // precompute local blocks
          // NB: These are equal here but are not equal if src_weights is different for B1 and B2
          for (x =0; x<Vsnk_f; x++) {
@@ -1163,19 +1198,19 @@ void make_two_nucleon_2pt(double* C_re,
                B2_Blocal_r2_re = B2_Blocal_r2_re_all + x2 * block_size;
                B2_Blocal_r2_im = B2_Blocal_r2_im_all + x2 * block_size;
                // create blocks
-               make_first_block(B1_Bfirst_r1_re, B1_Bfirst_r1_im, B1_prop_re, B1_prop_im, src_color_weights_r1, src_spin_weights_r1, src_weights_r1, src_psi_B1_re, src_psi_B1_im, t, x1, x2, Nc_f,Ns_f,Vsrc_f,Vsnk_f,Nt_f,Nw_f,Nq_f,Nsrc_f);
-               make_first_block(B1_Bfirst_r2_re, B1_Bfirst_r2_im, B1_prop_re, B1_prop_im, src_color_weights_r2, src_spin_weights_r2, src_weights_r2, src_psi_B1_re, src_psi_B1_im, t, x1, x2, Nc_f,Ns_f,Vsrc_f,Vsnk_f,Nt_f,Nw_f,Nq_f,Nsrc_f);
-               make_second_block(B1_Bsecond_r1_re, B1_Bsecond_r1_im, B1_prop_re, B1_prop_im, src_color_weights_r1, src_spin_weights_r1, src_weights_r1, src_psi_B1_re, src_psi_B1_im, t, x1, x2, Nc_f,Ns_f,Vsrc_f,Vsnk_f,Nt_f,Nw_f,Nq_f,Nsrc_f);
-               make_second_block(B1_Bsecond_r2_re, B1_Bsecond_r2_im, B1_prop_re, B1_prop_im, src_color_weights_r2, src_spin_weights_r2, src_weights_r2, src_psi_B1_re, src_psi_B1_im, t, x1, x2, Nc_f,Ns_f,Vsrc_f,Vsnk_f,Nt_f,Nw_f,Nq_f,Nsrc_f);
-               make_third_block(B1_Bthird_r1_re, B1_Bthird_r1_im, B1_prop_re, B1_prop_im, src_color_weights_r1, src_spin_weights_r1, src_weights_r1, src_psi_B1_re, src_psi_B1_im, t, x1, x2, Nc_f,Ns_f,Vsrc_f,Vsnk_f,Nt_f,Nw_f,Nq_f,Nsrc_f);
-               make_third_block(B1_Bthird_r2_re, B1_Bthird_r2_im, B1_prop_re, B1_prop_im, src_color_weights_r2, src_spin_weights_r2, src_weights_r2, src_psi_B1_re, src_psi_B1_im, t, x1, x2, Nc_f,Ns_f,Vsrc_f,Vsnk_f,Nt_f,Nw_f,Nq_f,Nsrc_f);
+               make_first_block(B1_Bfirst_r1_re, B1_Bfirst_r1_im, B1_packed_re, B1_packed_im, src_color_weights_r1, src_spin_weights_r1, src_weights_r1, src_psi_B1_re, src_psi_B1_im, t, x1, x2, Nc_f,Ns_f,Vsrc_f,Vsnk_f,Nt_f,Nw_f,Nq_f,Nsrc_f);
+               make_first_block(B1_Bfirst_r2_re, B1_Bfirst_r2_im, B1_packed_re, B1_packed_im, src_color_weights_r2, src_spin_weights_r2, src_weights_r2, src_psi_B1_re, src_psi_B1_im, t, x1, x2, Nc_f,Ns_f,Vsrc_f,Vsnk_f,Nt_f,Nw_f,Nq_f,Nsrc_f);
+               make_second_block(B1_Bsecond_r1_re, B1_Bsecond_r1_im, B1_packed_re, B1_packed_im, src_color_weights_r1, src_spin_weights_r1, src_weights_r1, src_psi_B1_re, src_psi_B1_im, t, x1, x2, Nc_f,Ns_f,Vsrc_f,Vsnk_f,Nt_f,Nw_f,Nq_f,Nsrc_f);
+               make_second_block(B1_Bsecond_r2_re, B1_Bsecond_r2_im, B1_packed_re, B1_packed_im, src_color_weights_r2, src_spin_weights_r2, src_weights_r2, src_psi_B1_re, src_psi_B1_im, t, x1, x2, Nc_f,Ns_f,Vsrc_f,Vsnk_f,Nt_f,Nw_f,Nq_f,Nsrc_f);
+               make_third_block(B1_Bthird_r1_re, B1_Bthird_r1_im, B1_packed_re, B1_packed_im, src_color_weights_r1, src_spin_weights_r1, src_weights_r1, src_psi_B1_re, src_psi_B1_im, t, x1, x2, Nc_f,Ns_f,Vsrc_f,Vsnk_f,Nt_f,Nw_f,Nq_f,Nsrc_f);
+               make_third_block(B1_Bthird_r2_re, B1_Bthird_r2_im, B1_packed_re, B1_packed_im, src_color_weights_r2, src_spin_weights_r2, src_weights_r2, src_psi_B1_re, src_psi_B1_im, t, x1, x2, Nc_f,Ns_f,Vsrc_f,Vsnk_f,Nt_f,Nw_f,Nq_f,Nsrc_f);
 
-               make_first_block(B2_Bfirst_r1_re, B2_Bfirst_r1_im, B2_prop_re, B2_prop_im, src_color_weights_r1, src_spin_weights_r1, src_weights_r1, src_psi_B2_re, src_psi_B2_im, t, x2, x1, Nc_f,Ns_f,Vsrc_f,Vsnk_f,Nt_f,Nw_f,Nq_f,Nsrc_f);
-               make_first_block(B2_Bfirst_r2_re, B2_Bfirst_r2_im, B2_prop_re, B2_prop_im, src_color_weights_r2, src_spin_weights_r2, src_weights_r2, src_psi_B2_re, src_psi_B2_im, t, x2, x1, Nc_f,Ns_f,Vsrc_f,Vsnk_f,Nt_f,Nw_f,Nq_f,Nsrc_f);
-               make_second_block(B2_Bsecond_r1_re, B2_Bsecond_r1_im, B2_prop_re, B2_prop_im, src_color_weights_r1, src_spin_weights_r1, src_weights_r1, src_psi_B2_re, src_psi_B2_im, t, x2, x1, Nc_f,Ns_f,Vsrc_f,Vsnk_f,Nt_f,Nw_f,Nq_f,Nsrc_f);
-               make_second_block(B2_Bsecond_r2_re, B2_Bsecond_r2_im, B2_prop_re, B2_prop_im, src_color_weights_r2, src_spin_weights_r2, src_weights_r2, src_psi_B2_re, src_psi_B2_im, t, x2, x1, Nc_f,Ns_f,Vsrc_f,Vsnk_f,Nt_f,Nw_f,Nq_f,Nsrc_f);
-               make_third_block(B2_Bthird_r1_re, B2_Bthird_r1_im, B2_prop_re, B2_prop_im, src_color_weights_r1, src_spin_weights_r1, src_weights_r1, src_psi_B2_re, src_psi_B2_im, t, x2, x1, Nc_f,Ns_f,Vsrc_f,Vsnk_f,Nt_f,Nw_f,Nq_f,Nsrc_f);
-               make_third_block(B2_Bthird_r2_re, B2_Bthird_r2_im, B2_prop_re, B2_prop_im, src_color_weights_r2, src_spin_weights_r2, src_weights_r2, src_psi_B2_re, src_psi_B2_im, t, x2, x1, Nc_f,Ns_f,Vsrc_f,Vsnk_f,Nt_f,Nw_f,Nq_f,Nsrc_f);
+               make_first_block(B2_Bfirst_r1_re, B2_Bfirst_r1_im, B2_packed_re, B2_packed_im, src_color_weights_r1, src_spin_weights_r1, src_weights_r1, src_psi_B2_re, src_psi_B2_im, t, x2, x1, Nc_f,Ns_f,Vsrc_f,Vsnk_f,Nt_f,Nw_f,Nq_f,Nsrc_f);
+               make_first_block(B2_Bfirst_r2_re, B2_Bfirst_r2_im, B2_packed_re, B2_packed_im, src_color_weights_r2, src_spin_weights_r2, src_weights_r2, src_psi_B2_re, src_psi_B2_im, t, x2, x1, Nc_f,Ns_f,Vsrc_f,Vsnk_f,Nt_f,Nw_f,Nq_f,Nsrc_f);
+               make_second_block(B2_Bsecond_r1_re, B2_Bsecond_r1_im, B2_packed_re, B2_packed_im, src_color_weights_r1, src_spin_weights_r1, src_weights_r1, src_psi_B2_re, src_psi_B2_im, t, x2, x1, Nc_f,Ns_f,Vsrc_f,Vsnk_f,Nt_f,Nw_f,Nq_f,Nsrc_f);
+               make_second_block(B2_Bsecond_r2_re, B2_Bsecond_r2_im, B2_packed_re, B2_packed_im, src_color_weights_r2, src_spin_weights_r2, src_weights_r2, src_psi_B2_re, src_psi_B2_im, t, x2, x1, Nc_f,Ns_f,Vsrc_f,Vsnk_f,Nt_f,Nw_f,Nq_f,Nsrc_f);
+               make_third_block(B2_Bthird_r1_re, B2_Bthird_r1_im, B2_packed_re, B2_packed_im, src_color_weights_r1, src_spin_weights_r1, src_weights_r1, src_psi_B2_re, src_psi_B2_im, t, x2, x1, Nc_f,Ns_f,Vsrc_f,Vsnk_f,Nt_f,Nw_f,Nq_f,Nsrc_f);
+               make_third_block(B2_Bthird_r2_re, B2_Bthird_r2_im, B2_packed_re, B2_packed_im, src_color_weights_r2, src_spin_weights_r2, src_weights_r2, src_psi_B2_re, src_psi_B2_im, t, x2, x1, Nc_f,Ns_f,Vsrc_f,Vsnk_f,Nt_f,Nw_f,Nq_f,Nsrc_f);
                /* compute two nucleon correlators from blocks */
                int* src_spins = (int *) malloc(2 * sizeof (int));
                src_spins[0] = 1;
@@ -1238,6 +1273,10 @@ void make_two_nucleon_2pt(double* C_re,
                C_im[index_4d(3,m,n,t ,Nsrc_f+Nsrc_fHex,Nsnk_f+Nsnk_fHex,Nt_f)] += BB_r3_im[index_3d(m,n,t,Nsnk_f,Nt_f)];
             }
          }
+         free(B1_packed_re);
+         free(B1_packed_im);
+         free(B2_packed_re);
+         free(B2_packed_im);
       }
       free(B1_Blocal_r1_re_all);
       free(B1_Blocal_r1_im_all);
