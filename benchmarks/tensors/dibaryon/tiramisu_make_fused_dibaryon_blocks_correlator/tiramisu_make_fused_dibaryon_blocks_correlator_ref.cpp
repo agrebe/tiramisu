@@ -181,11 +181,12 @@ void make_block(double* B_re,
    int iCprime, iSprime, jCprime, jSprime, kCprime, kSprime, iC, iS, jC, jS, kC, kS, y, wnum, m;
    /* subexpressions */
    std::complex <double> prop_prod_02;
-   double * prop_prod_re_all = (double *) malloc(Vsrc_f * Nc * Ns * Nc * Ns * Nc * Ns * sizeof(double));
-   double * prop_prod_im_all = (double *) malloc(Vsrc_f * Nc * Ns * Nc * Ns * Nc * Ns * sizeof(double));
-   for (int i = 0; i < Vsrc_f * Nc * Ns * Nc * Ns * Nc * Ns; i ++)
+   int sc_prod = Nc * Ns * Nc * Ns * Nc * Ns;
+   double * prop_prod_re_all = (double *) malloc(Vsrc_f * sc_prod * sizeof(double));
+   double * prop_prod_im_all = (double *) malloc(Vsrc_f * sc_prod * sizeof(double));
+   for (int i = 0; i < Vsrc_f * sc_prod; i ++)
      prop_prod_re_all[i] = prop_prod_im_all[i] = 0;
-   double prop_prod_02_re[Ns * Nc], prop_prod_02_im[Ns * Nc];
+   double prop_prod_02_all_re[sc_prod], prop_prod_02_all_im[sc_prod];
    /* initialize */
    zero_block(B_re);
    zero_block(B_im);
@@ -212,31 +213,40 @@ void make_block(double* B_re,
    weights_time -= clock();
    /* build local (no quark exchange) block */
    for (y=0; y<Vsrc_f; y++) {
+      for (int index = 0; index < sc_prod; index ++) {
+         prop_prod_02_all_re[index] = prop_prod_02_all_im[index] = 0;
+      }
+      for (wnum=0; wnum<Nw_f; wnum++) {
+         iC = color_weights[index_2d(wnum,0, Nq_f)];
+         iS = spin_weights[index_2d(wnum,0, Nq_f)];
+         jC = color_weights[index_2d(wnum,1, Nq_f)];
+         jS = spin_weights[index_2d(wnum,1, Nq_f)];
+         kC = color_weights[index_2d(wnum,2, Nq_f)];
+         kS = spin_weights[index_2d(wnum,2, Nq_f)];
+         for (iCprime=0; iCprime<Nc; iCprime++) {
+            for (iSprime=0; iSprime<Ns; iSprime++) {
+               int prop_0_index = (((y * Nc + iC) * Ns + iS) * Nc + iCprime) * Ns + iSprime;
+               double prop_0_re = packed_prop_0_re[prop_0_index];
+               double prop_0_im = packed_prop_0_im[prop_0_index];
+               for (kCprime=0; kCprime<Nc; kCprime++) {
+                  for (kSprime=0; kSprime<Ns; kSprime++) {
+                     int prop_2_index = (((y * Nc + kC) * Ns + kS) * Nc + kCprime) * Ns + kSprime;
+                     double prop_2_re = packed_prop_2_re[prop_2_index];
+                     double prop_2_im = packed_prop_2_im[prop_2_index];
+                     int prop_prod_index = (((((iCprime) * Ns + iSprime) * Nc + kCprime) * Ns + kSprime) * Nc + jC) * Ns + jS;
+                     prop_prod_02_all_re[prop_prod_index] += weights[wnum] * (prop_0_re * prop_2_re - prop_0_im * prop_2_im);
+                     prop_prod_02_all_im[prop_prod_index] += weights[wnum] * (prop_0_im * prop_2_re + prop_0_re * prop_2_im);
+                  }
+               }
+            }
+         }
+      }
       for (iCprime=0; iCprime<Nc; iCprime++) {
          for (iSprime=0; iSprime<Ns; iSprime++) {
             for (kCprime=0; kCprime<Nc; kCprime++) {
                for (kSprime=0; kSprime<Ns; kSprime++) {
                   double * prop_prod_re = prop_prod_re_all + ((((y * Nc + iCprime) * Ns + iSprime) * Nc + kCprime) * Ns + kSprime) * Ns * Nc;
                   double * prop_prod_im = prop_prod_im_all + ((((y * Nc + iCprime) * Ns + iSprime) * Nc + kCprime) * Ns + kSprime) * Ns * Nc;
-                  for (int index = 0; index < Nc * Ns; index ++) {
-                     prop_prod_02_re[index] = prop_prod_02_im[index] = 0;
-                  }
-                  for (wnum=0; wnum<Nw_f; wnum++) {
-                     iC = color_weights[index_2d(wnum,0, Nq_f)];
-                     iS = spin_weights[index_2d(wnum,0, Nq_f)];
-                     jC = color_weights[index_2d(wnum,1, Nq_f)];
-                     jS = spin_weights[index_2d(wnum,1, Nq_f)];
-                     kC = color_weights[index_2d(wnum,2, Nq_f)];
-                     kS = spin_weights[index_2d(wnum,2, Nq_f)];
-                     int prop_0_index = (((y * Nc + iC) * Ns + iS) * Nc + iCprime) * Ns + iSprime;
-                     int prop_2_index = (((y * Nc + kC) * Ns + kS) * Nc + kCprime) * Ns + kSprime;
-                     double prop_0_re = packed_prop_0_re[prop_0_index];
-                     double prop_0_im = packed_prop_0_im[prop_0_index];
-                     double prop_2_re = packed_prop_2_re[prop_2_index];
-                     double prop_2_im = packed_prop_2_im[prop_2_index];
-                     prop_prod_02_re[jC * Ns + jS] += weights[wnum] * (prop_0_re * prop_2_re - prop_0_im * prop_2_im);
-                     prop_prod_02_im[jC * Ns + jS] += weights[wnum] * (prop_0_im * prop_2_re + prop_0_re * prop_2_im);
-                  }
                   for (jC = 0; jC < Nc; jC ++) {
                      for (jS = 0; jS < Ns; jS ++) {
                         for (jCprime=0; jCprime<Nc; jCprime++) {
@@ -244,6 +254,8 @@ void make_block(double* B_re,
                               int packed_index = (((y * Nc + jC) * Ns + jS) * Nc + jCprime) * Ns + jSprime;
                               double prop_1_re = packed_prop_1_re[packed_index];
                               double prop_1_im = packed_prop_1_im[packed_index];
+                              double * prop_prod_02_re = prop_prod_02_all_re + ((((iCprime) * Ns + iSprime) * Nc + kCprime) * Ns + kSprime) * Nc * Ns;
+                              double * prop_prod_02_im = prop_prod_02_all_im + ((((iCprime) * Ns + iSprime) * Nc + kCprime) * Ns + kSprime) * Nc * Ns;
                               prop_prod_re[jCprime * Ns + jSprime] += prop_1_re * prop_prod_02_re[jC * Ns + jS] - prop_1_im * prop_prod_02_im[jC * Ns + jS];
                               prop_prod_im[jCprime * Ns + jSprime] += prop_1_im * prop_prod_02_re[jC * Ns + jS] + prop_1_re * prop_prod_02_im[jC * Ns + jS];
                            }
