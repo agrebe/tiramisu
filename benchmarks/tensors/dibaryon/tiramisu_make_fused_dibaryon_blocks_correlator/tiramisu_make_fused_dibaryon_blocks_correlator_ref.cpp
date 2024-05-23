@@ -5,10 +5,13 @@
 #include <math.h>
 #include <time.h>
 
-#undef K
-#undef M
-#undef N
-#include <mkl.h>
+#define MKL 1
+#if MKL
+  #undef K
+  #undef M
+  #undef N
+  #include <mkl.h>
+#endif
 
 #define AVX2 1
 #if AVX2
@@ -77,6 +80,10 @@ int Blocal_index(int c1, int s1, int c2, int s2, int c3, int s3, int m, int Nc_f
 
 // timers
 clock_t block_time;
+clock_t init_time;
+clock_t weights_time;
+clock_t mkl_time;
+clock_t pack_time;
 clock_t correlator_time;
 clock_t total_time;
 
@@ -167,6 +174,7 @@ void make_block(double* B_re,
     const int Nq_f,
     const int Nsrc_f) {
    block_time -= clock();
+   init_time -= clock();
    assert(Nc == Nc_f);
    assert(Ns == Ns_f);
    /* loop indices */
@@ -200,6 +208,8 @@ void make_block(double* B_re,
                   packed_prop_2_re[new_index] = prop_re[old_index];
                   packed_prop_2_im[new_index] = prop_im[old_index];
                }
+   init_time += clock();
+   weights_time -= clock();
    /* build local (no quark exchange) block */
    for (y=0; y<Vsrc_f; y++) {
       for (iCprime=0; iCprime<Nc; iCprime++) {
@@ -210,7 +220,6 @@ void make_block(double* B_re,
                   double * prop_prod_im = prop_prod_im_all + ((((y * Nc + iCprime) * Ns + iSprime) * Nc + kCprime) * Ns + kSprime) * Ns * Nc;
                   for (int index = 0; index < Nc * Ns; index ++) {
                      prop_prod_02_re[index] = prop_prod_02_im[index] = 0;
-//                     prop_prod_re[index] = prop_prod_im[index] = 0;
                   }
                   for (wnum=0; wnum<Nw_f; wnum++) {
                      iC = color_weights[index_2d(wnum,0, Nq_f)];
@@ -246,50 +255,53 @@ void make_block(double* B_re,
          }
       }
    }
-   #if 1
-   int l = (Nc * Ns) * (Nc * Ns) * (Nc * Ns); // 216
-   m = Vsrc_f; // 512
-   int n = Nsrc_f; // 44
-   std::complex<double> alpha = 1;
-   std::complex<double> beta = 0;
-   std::complex<double> * A = (std::complex<double>*) malloc(2 * sizeof(double) * l * m);
-   std::complex<double> * B = (std::complex<double>*) malloc(2 * sizeof(double) * m * n);
-   std::complex<double> * C = (std::complex<double>*) malloc(2 * sizeof(double) * l * n);
-   for (int i = 0; i < l * m; i ++)
-     A[i] = std::complex<double>(prop_prod_re_all[i], prop_prod_im_all[i]);
-   for (int i = 0; i < m * n; i ++)
-     B[i] = std::complex<double>(psi_re[i], psi_im[i]);
-   //complex double * A = prop_prod_all; //malloc(sizeof(complex double) * l * m);
-   //complex double * B = psi_all; //malloc(sizeof(complex double) * m * n);
-   //complex double * C = B_all; //malloc(sizeof(complex double) * l * n);
-   cblas_zgemm3m(CblasRowMajor, CblasTrans, CblasNoTrans, l, n, m,
-       &alpha, A, l, B, n, &beta, C, n);
-   for (int i = 0; i < l * n; i ++) {
-     B_re[i] = real(C[i]);
-     B_im[i] = imag(C[i]);
-   }
-   free(A);
-   free(B);
-   free(C);
+   weights_time += clock();
+   #if MKL
+     pack_time -= clock();
+     int l = (Nc * Ns) * (Nc * Ns) * (Nc * Ns); // 216
+     m = Vsrc_f; // 512
+     int n = Nsrc_f; // 44
+     std::complex<double> alpha = 1;
+     std::complex<double> beta = 0;
+     std::complex<double> * A = (std::complex<double>*) malloc(2 * sizeof(double) * l * m);
+     std::complex<double> * B = (std::complex<double>*) malloc(2 * sizeof(double) * m * n);
+     std::complex<double> * C = (std::complex<double>*) malloc(2 * sizeof(double) * l * n);
+     pack_time += clock();
+     mkl_time -= clock();
+     for (int i = 0; i < l * m; i ++)
+       A[i] = std::complex<double>(prop_prod_re_all[i], prop_prod_im_all[i]);
+     for (int i = 0; i < m * n; i ++)
+       B[i] = std::complex<double>(psi_re[i], psi_im[i]);
+     cblas_zgemm3m(CblasRowMajor, CblasTrans, CblasNoTrans, l, n, m,
+         &alpha, A, l, B, n, &beta, C, n);
+     pack_time -= clock();
+     mkl_time += clock();
+     for (int i = 0; i < l * n; i ++) {
+       B_re[i] = real(C[i]);
+       B_im[i] = imag(C[i]);
+     }
+     pack_time += clock();
+     free(A);
+     free(B);
+     free(C);
    #else
-
-   for (y=0; y<Vsrc_f; y++) {
-      for (iCprime=0; iCprime<Nc; iCprime++) {
-         for (iSprime=0; iSprime<Ns; iSprime++) {
-            for (kCprime=0; kCprime<Nc; kCprime++) {
-               for (kSprime=0; kSprime<Ns; kSprime++) {
-                  double * prop_prod_re = prop_prod_re_all + ((((y * Nc + iCprime) * Ns + iSprime) * Nc + kCprime) * Ns + kSprime) * Ns * Nc;
-                  double * prop_prod_im = prop_prod_im_all + ((((y * Nc + iCprime) * Ns + iSprime) * Nc + kCprime) * Ns + kSprime) * Ns * Nc;
-                  for (jCprime=0; jCprime<Nc; jCprime++) {
-                     for (jSprime=0; jSprime<Ns; jSprime++) {
-                        block_ft(B_re, B_im);
+      for (y=0; y<Vsrc_f; y++) {
+         for (iCprime=0; iCprime<Nc; iCprime++) {
+            for (iSprime=0; iSprime<Ns; iSprime++) {
+               for (kCprime=0; kCprime<Nc; kCprime++) {
+                  for (kSprime=0; kSprime<Ns; kSprime++) {
+                     double * prop_prod_re = prop_prod_re_all + ((((y * Nc + iCprime) * Ns + iSprime) * Nc + kCprime) * Ns + kSprime) * Ns * Nc;
+                     double * prop_prod_im = prop_prod_im_all + ((((y * Nc + iCprime) * Ns + iSprime) * Nc + kCprime) * Ns + kSprime) * Ns * Nc;
+                     for (jCprime=0; jCprime<Nc; jCprime++) {
+                        for (jSprime=0; jSprime<Ns; jSprime++) {
+                           block_ft(B_re, B_im);
+                        }
                      }
                   }
                }
             }
          }
       }
-   }
    #endif
    free(prop_prod_re_all);
    free(prop_prod_im_all);
@@ -1400,6 +1412,10 @@ void make_two_nucleon_2pt(double* C_re,
    free(H_BB_r3_im);
    total_time += clock();
    printf("Time in make_block: %f\n", ((float) block_time) / CLOCKS_PER_SEC);
+   printf("Time in block init: %f\n", ((float) init_time) / CLOCKS_PER_SEC);
+   printf("Time in weight multiplication: %f\n", ((float) weights_time) / CLOCKS_PER_SEC);
+   printf("Time in packing: %f\n", ((float) pack_time) / CLOCKS_PER_SEC);
+   printf("Time in MKL call: %f\n", ((float) mkl_time) / CLOCKS_PER_SEC);
    printf("Time in make_dibaryon_correlator: %f\n", ((float) correlator_time) / CLOCKS_PER_SEC);
    printf("Total time: %f\n", ((float) total_time) / CLOCKS_PER_SEC);
 }
