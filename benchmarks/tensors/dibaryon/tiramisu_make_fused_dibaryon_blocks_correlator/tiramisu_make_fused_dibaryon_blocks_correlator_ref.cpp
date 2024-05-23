@@ -333,6 +333,14 @@ void make_block(double* B_re,
    #endif
    free(prop_prod_re_all);
    free(prop_prod_im_all);
+   if (!(packed)) {
+      free(packed_prop_0_re);
+      free(packed_prop_0_im);
+      free(packed_prop_1_re);
+      free(packed_prop_1_im);
+      free(packed_prop_2_re);
+      free(packed_prop_2_im);
+   }
    block_time += clock();
 }
 
