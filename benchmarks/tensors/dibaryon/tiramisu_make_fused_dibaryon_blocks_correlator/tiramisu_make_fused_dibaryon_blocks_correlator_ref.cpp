@@ -5,6 +5,11 @@
 #include <math.h>
 #include <time.h>
 
+#undef K
+#undef M
+#undef N
+#include <mkl.h>
+
 #define AVX2 1
 #if AVX2
   #include <immintrin.h>
@@ -168,7 +173,10 @@ void make_block(double* B_re,
    int iCprime, iSprime, jCprime, jSprime, kCprime, kSprime, iC, iS, jC, jS, kC, kS, y, wnum, m;
    /* subexpressions */
    std::complex <double> prop_prod_02;
-   double prop_prod_re[Ns * Nc], prop_prod_im[Ns * Nc];
+   double * prop_prod_re_all = (double *) malloc(Vsrc_f * Nc * Ns * Nc * Ns * Nc * Ns * sizeof(double));
+   double * prop_prod_im_all = (double *) malloc(Vsrc_f * Nc * Ns * Nc * Ns * Nc * Ns * sizeof(double));
+   for (int i = 0; i < Vsrc_f * Nc * Ns * Nc * Ns * Nc * Ns; i ++)
+     prop_prod_re_all[i] = prop_prod_im_all[i] = 0;
    double prop_prod_02_re[Ns * Nc], prop_prod_02_im[Ns * Nc];
    /* initialize */
    zero_block(B_re);
@@ -193,14 +201,16 @@ void make_block(double* B_re,
                   packed_prop_2_im[new_index] = prop_im[old_index];
                }
    /* build local (no quark exchange) block */
-   for (iCprime=0; iCprime<Nc; iCprime++) {
-      for (iSprime=0; iSprime<Ns; iSprime++) {
-         for (kCprime=0; kCprime<Nc; kCprime++) {
-            for (kSprime=0; kSprime<Ns; kSprime++) {
-               for (y=0; y<Vsrc_f; y++) {
+   for (y=0; y<Vsrc_f; y++) {
+      for (iCprime=0; iCprime<Nc; iCprime++) {
+         for (iSprime=0; iSprime<Ns; iSprime++) {
+            for (kCprime=0; kCprime<Nc; kCprime++) {
+               for (kSprime=0; kSprime<Ns; kSprime++) {
+                  double * prop_prod_re = prop_prod_re_all + ((((y * Nc + iCprime) * Ns + iSprime) * Nc + kCprime) * Ns + kSprime) * Ns * Nc;
+                  double * prop_prod_im = prop_prod_im_all + ((((y * Nc + iCprime) * Ns + iSprime) * Nc + kCprime) * Ns + kSprime) * Ns * Nc;
                   for (int index = 0; index < Nc * Ns; index ++) {
-                     prop_prod_re[index] = prop_prod_im[index] = 0;
                      prop_prod_02_re[index] = prop_prod_02_im[index] = 0;
+//                     prop_prod_re[index] = prop_prod_im[index] = 0;
                   }
                   for (wnum=0; wnum<Nw_f; wnum++) {
                      iC = color_weights[index_2d(wnum,0, Nq_f)];
@@ -231,6 +241,45 @@ void make_block(double* B_re,
                         }
                      }
                   }
+               }
+            }
+         }
+      }
+   }
+   #if 1
+   int l = (Nc * Ns) * (Nc * Ns) * (Nc * Ns); // 216
+   m = Vsrc_f; // 512
+   int n = Nsrc_f; // 44
+   std::complex<double> alpha = 1;
+   std::complex<double> beta = 0;
+   std::complex<double> * A = (std::complex<double>*) malloc(2 * sizeof(double) * l * m);
+   std::complex<double> * B = (std::complex<double>*) malloc(2 * sizeof(double) * m * n);
+   std::complex<double> * C = (std::complex<double>*) malloc(2 * sizeof(double) * l * n);
+   for (int i = 0; i < l * m; i ++)
+     A[i] = std::complex<double>(prop_prod_re_all[i], prop_prod_im_all[i]);
+   for (int i = 0; i < m * n; i ++)
+     B[i] = std::complex<double>(psi_re[i], psi_im[i]);
+   //complex double * A = prop_prod_all; //malloc(sizeof(complex double) * l * m);
+   //complex double * B = psi_all; //malloc(sizeof(complex double) * m * n);
+   //complex double * C = B_all; //malloc(sizeof(complex double) * l * n);
+   cblas_zgemm3m(CblasRowMajor, CblasTrans, CblasNoTrans, l, n, m,
+       &alpha, A, l, B, n, &beta, C, n);
+   for (int i = 0; i < l * n; i ++) {
+     B_re[i] = real(C[i]);
+     B_im[i] = imag(C[i]);
+   }
+   free(A);
+   free(B);
+   free(C);
+   #else
+
+   for (y=0; y<Vsrc_f; y++) {
+      for (iCprime=0; iCprime<Nc; iCprime++) {
+         for (iSprime=0; iSprime<Ns; iSprime++) {
+            for (kCprime=0; kCprime<Nc; kCprime++) {
+               for (kSprime=0; kSprime<Ns; kSprime++) {
+                  double * prop_prod_re = prop_prod_re_all + ((((y * Nc + iCprime) * Ns + iSprime) * Nc + kCprime) * Ns + kSprime) * Ns * Nc;
+                  double * prop_prod_im = prop_prod_im_all + ((((y * Nc + iCprime) * Ns + iSprime) * Nc + kCprime) * Ns + kSprime) * Ns * Nc;
                   for (jCprime=0; jCprime<Nc; jCprime++) {
                      for (jSprime=0; jSprime<Ns; jSprime++) {
                         block_ft(B_re, B_im);
@@ -241,6 +290,9 @@ void make_block(double* B_re,
          }
       }
    }
+   #endif
+   free(prop_prod_re_all);
+   free(prop_prod_im_all);
    block_time += clock();
 }
 
