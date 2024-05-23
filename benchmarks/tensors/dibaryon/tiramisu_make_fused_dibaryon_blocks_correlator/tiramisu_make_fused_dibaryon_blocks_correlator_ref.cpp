@@ -68,14 +68,8 @@ int Blocal_index(int c1, int s1, int c2, int s2, int c3, int s3, int m, int Nc_f
 }
 
 #define zero_block(B) { \
-   for (iCprime=0; iCprime<Nc_f; iCprime++) \
-      for (iSprime=0; iSprime<Ns_f; iSprime++) \
-         for (kCprime=0; kCprime<Nc_f; kCprime++) \
-            for (kSprime=0; kSprime<Ns_f; kSprime++) \
-               for (jCprime=0; jCprime<Nc_f; jCprime++) \
-                  for (jSprime=0; jSprime<Ns_f; jSprime++) \
-                     for (m=0; m<Nsrc_f; m++) \
-                        B[Blocal_index(iCprime,iSprime,kCprime,kSprime,jCprime,jSprime,m ,Nc_f,Ns_f,Nsrc_f)] = 0.0; \
+   for (int i = 0; i < Nsrc_f * Nc * Ns * Nc * Ns * Nc * Ns; i ++) \
+      B[i] = 0; \
 }
 
 // timers
@@ -189,8 +183,6 @@ void make_block(double* B_re,
      prop_prod_re_all[i] = prop_prod_im_all[i] = 0;
    double prop_prod_02_all_re[sc_prod], prop_prod_02_all_im[sc_prod];
    /* initialize */
-   zero_block(B_re);
-   zero_block(B_im);
    double * packed_prop_0_re, * packed_prop_0_im, 
           * packed_prop_1_re, * packed_prop_1_im, 
           * packed_prop_2_re, * packed_prop_2_im;
